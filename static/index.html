@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>APP FIBER CABLE</title>
+<style>
+  :root { --bg:#f4f6f9; --card:#fff; --ink:#1d2733; --muted:#66727f; --line:#d8dee6; --acc:#1f4e79;
+          --out:#ffc7ce; --outInk:#c00000; --miss:#fff2cc; --edit:#dbeafe; --calc:#dcfce7; --calcInk:#15803d; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.4 system-ui, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--ink); }
+  header { background:var(--acc); color:#fff; padding:10px 18px; display:flex; align-items:center; gap:16px; }
+  header h1 { font-size:18px; margin:0; }
+  header .sp { flex:1; }
+  main { padding:14px 18px; display:grid; grid-template-columns: 320px 1fr; gap:14px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  main > div { min-width:0; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
+  .card h2 { font-size:14px; margin:0 0 8px; color:var(--acc); text-transform:uppercase; letter-spacing:.04em; }
+  label { display:block; font-size:12px; color:var(--muted); margin-top:6px; }
+  label.chk { display:flex; gap:6px; align-items:center; color:var(--ink); font-size:13px; }
+  label.chk input { width:auto; }
+  input, select { width:100%; padding:5px 7px; border:1px solid var(--line); border-radius:5px; font:inherit; }
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  button { background:var(--acc); color:#fff; border:0; border-radius:6px; padding:7px 14px; font:inherit; cursor:pointer; }
+  button.sec { background:#e7edf5; color:var(--acc); }
+  button.on { background:var(--calcInk); color:#fff; }
+  button.small { padding:3px 9px; font-size:12px; }
+  button:disabled { opacity:.5; cursor:default; }
+  #drop { border:2px dashed var(--line); border-radius:8px; padding:18px; text-align:center; color:var(--muted); cursor:pointer; }
+  #drop.over { border-color:var(--acc); background:#eef3fa; }
+  table { border-collapse:collapse; font-size:12px; }
+  th, td { border:1px solid var(--line); padding:3px 5px; text-align:center; white-space:nowrap; }
+  th { background:#e7edf5; }
+  td.out, td.out input { background:var(--out); color:var(--outInk); font-weight:700; }
+  td.miss { background:var(--miss); }
+  td.edit { background:var(--edit); }
+  td.calc { background:var(--calc); }
+  td.calc input { color:var(--calcInk); font-style:italic; }
+  td.recalc input { text-decoration:underline dotted; }
+  td input.v { width:62px; border:0; background:transparent; text-align:center; padding:1px; font:inherit; }
+  .scroll { overflow:auto; max-width:100%; }
+  .tabs { display:flex; gap:4px; margin-bottom:8px; flex-wrap:wrap; }
+  .tabs button { background:#e7edf5; color:var(--acc); }
+  .tabs button.on { background:var(--acc); color:#fff; }
+  #chart { width:100%; height:360px; display:block; background:#fff; cursor:crosshair; touch-action:pan-y; }
+  #chart.add { cursor:copy; }
+  .muted { color:var(--muted); font-size:12px; }
+  .warn { color:#9a3412; font-size:12px; overflow-wrap:anywhere; }
+  .legend span { display:inline-block; margin-right:12px; font-size:12px; }
+  .legend i { display:inline-block; width:14px; height:3px; vertical-align:middle; margin-right:4px; }
+  .pill { display:inline-block; padding:1px 7px; border-radius:10px; background:#e7edf5; font-size:11px; }
+  .pill.calc { background:var(--calc); color:var(--calcInk); }
+  .hidden { display:none; }
+  .key span { display:inline-block; margin-right:12px; }
+  .key b { display:inline-block; width:12px; height:12px; vertical-align:middle; margin-right:4px; border:1px solid var(--line); }
+  details.card > summary { list-style:none; cursor:pointer; }
+  details.card > summary::-webkit-details-marker { display:none; }
+  details.card > summary h2 { display:inline; }
+  details.card > summary::after { content:'▾'; float:right; color:var(--muted); }
+  details.card:not([open]) > summary::after { content:'▸'; }
+  details.card:not([open]) > summary h2 { margin:0; }
+  #saveBox { display:flex; gap:6px; align-items:center; }
+  #saveBox a { color:#fff; font-size:13px; }
+  #engine { font-size:12px; color:#c9d6e6; }
+  /* telemóvel */
+  @media (max-width: 700px) {
+    header { padding:8px 12px; gap:8px; flex-wrap:wrap; }
+    header .sub { display:none; }
+    main { padding:10px; gap:0; }
+    .card { padding:10px; }
+    input, select, button { font-size:16px; }
+    button { padding:9px 14px; }
+    button.small { padding:6px 10px; font-size:14px; }
+    td input.v { font-size:13px; width:56px; }
+    input.pn { width:150px !important; }
+    #chart { height:260px; }
+    #chartHelp { display:none; }
+    .scroll { max-height:70vh; }
+    .scroll table th:first-child, .scroll table td:first-child { position:sticky; left:0; z-index:1; }
+    .scroll table th:first-child { background:#e7edf5; }
+    .scroll table td:first-child { background:#fff; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>APP FIBER CABLE</h1>
+  <span class="muted sub" style="color:#c9d6e6">Pós-processamento OTDR (.sor)</span>
+  <span id="engine"></span>
+  <span class="sp"></span>
+  <button id="btnExport" class="sec" disabled>Exportar Excel</button>
+  <span id="saveBox"></span>
+</header>
+<main>
+  <div>
+    <div class="card">
+      <h2>Ficheiros</h2>
+      <div id="drop">Arrastar ficheiros .sor (ou um .zip) para aqui<br>ou clicar para escolher</div>
+      <input id="file" type="file" multiple class="hidden">
+      <div id="files" class="muted" style="margin-top:8px"></div>
+    </div>
+    <details class="card fold" open>
+      <summary><h2>Processamento</h2></summary>
+      <div class="row2">
+        <div><label>Modo de medida</label>
+          <select id="mode"><option value="auto">Automático</option><option value="loop">Bouclage</option><option value="direct">OE / EO separados</option></select></div>
+        <div><label>Tolerância alinhamento (m)</label><input id="tol" type="number" value="20" step="1"></div>
+      </div>
+      <label class="chk" style="margin-top:10px"><input id="auto_fill" type="checkbox" checked> Calcular na curva os eventos que o OTDR não marcou</label>
+      <label class="chk"><input id="detect" type="checkbox" checked> Procurar eventos que nenhuma medida marcou</label>
+      <label>Limiar de deteção (dB)</label><input id="detect_threshold" type="number" value="0.05" step="0.01">
+      <h2 style="margin-top:12px">Limiares</h2>
+      <div class="row2">
+        <div><label>Épissure (dB)</label><input id="th_splice" type="number" step="0.01"></div>
+        <div><label>Connecteur (dB)</label><input id="th_connector" type="number" step="0.01"></div>
+        <div><label>Pente 1310 (dB/km)</label><input id="th_s1310" type="number" step="0.01"></div>
+        <div><label>Pente 1550 (dB/km)</label><input id="th_s1550" type="number" step="0.01"></div>
+        <div><label>Réflectance (dB)</label><input id="th_refl" type="number" step="1"></div>
+        <div><label>Écart 1550-1310 (dB)</label><input id="th_diff" type="number" step="0.01"></div>
+      </div>
+      <div style="margin-top:10px"><button id="btnApply" disabled>Recalcular</button></div>
+    </details>
+    <details class="card fold" open>
+      <summary><h2>Relatório</h2></summary>
+      <label>Nome do cabo</label><input id="m_cable">
+      <label>Origem</label><input id="m_origin">
+      <label>Extremidade</label><input id="m_end">
+      <label>Morada (cabeçalho)</label><input id="m_address">
+      <div class="row2">
+        <div><label>Empresa (raccordement)</label><input id="m_company"></div>
+        <div><label>Chefe de projeto</label><input id="m_manager"></div>
+        <div><label>Tipo de cabo</label><input id="m_cable_type"></div>
+        <div><label>Tipo de fibra</label><input id="m_fiber_type"></div>
+      </div>
+      <label>Data</label><input id="m_date" type="date">
+    </details>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Traços</h2>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px">
+        <select id="traceSel" style="width:auto; max-width:100%"></select>
+        <button id="btnAdd" class="sec small" disabled>+ Adicionar evento</button>
+        <button id="btnZoom" class="sec small">Repor zoom</button>
+        <span class="muted" id="chartHelp">Arrastar no gráfico para fazer zoom, duplo clique para repor.</span>
+      </div>
+      <canvas id="chart"></canvas>
+      <div id="legend" class="legend"></div>
+    </div>
+    <div class="card">
+      <h2>Pontos alinhados</h2>
+      <div id="points" class="scroll muted">Carregue os ficheiros .sor para começar.</div>
+      <div id="sugg"></div>
+      <div id="warnings"></div>
+    </div>
+    <div class="card">
+      <div class="tabs" id="tabs">
+        <button data-t="splices" class="on">Connecteurs &amp; épissures</button>
+        <button data-t="slopes">Pentes</button>
+        <button data-t="refl">Réflectances</button>
+        <button data-t="out">Hors normes</button>
+        <button data-t="segs">Medidas</button>
+      </div>
+      <div id="tab" class="scroll"></div>
+      <p class="muted key">
+        <span><b style="background:var(--out)"></b>fora do limiar</span>
+        <span><b style="background:var(--calc)"></b>calculado na curva (OTDR não marcou)</span>
+        <span><b style="background:var(--miss)"></b>sem valor</span>
+        <span><b style="background:var(--edit)"></b>corrigido à mão</span>
+        <span>sublinhado = perda do OTDR recalculada por causa de um evento acrescentado ao lado</span>
+      </p>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let R = null, job = null, tab = 'splices', addMode = false;
+// nomes, correções e exclusões indexados pela posição do ponto (m desde a origem)
+const state = { names: {}, excluded: [], overrides: {}, fiber_numbers: {}, manual: [] };
+const COLORS = ['#1f77b4','#d62728','#2ca02c','#9467bd','#ff7f0e','#17becf','#8c564b','#e377c2'];
+const touch = matchMedia('(pointer: coarse)').matches;
+if (matchMedia('(max-width: 700px)').matches) document.querySelectorAll('details.fold').forEach(d => d.open = false);
+if (touch) $('drop').innerHTML = 'Tocar para escolher os ficheiros .sor<br>(ou um .zip com eles)';
+const fmt = (v, d=3) => v === null || v === undefined ? '' : Number(v).toFixed(d);
+
+fetch('/api/defaults').then(r => r.json()).then(d => {
+  $('th_splice').value = d.splice; $('th_connector').value = d.connector; $('th_refl').value = d.reflectance;
+  $('th_s1310').value = d.slope['1310']; $('th_s1550').value = d.slope['1550']; $('th_diff').value = d.diff_1550_1310;
+});
+
+const drop = $('drop');
+drop.onclick = () => $('file').click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); upload(e.dataTransfer.files); };
+$('file').onchange = e => upload(e.target.files);
+
+function config() {
+  return {
+    mode: $('mode').value, tol: $('tol').value,
+    auto_fill: $('auto_fill').checked, detect: $('detect').checked, detect_threshold: $('detect_threshold').value,
+    thresholds: { splice: $('th_splice').value, connector: $('th_connector').value, reflectance: $('th_refl').value,
+                  diff_1550_1310: $('th_diff').value, slope: { 1310: $('th_s1310').value, 1550: $('th_s1550').value } },
+    names: state.names, excluded: state.excluded, overrides: state.overrides, fiber_numbers: state.fiber_numbers,
+    manual: state.manual,
+    meta: { cable: $('m_cable').value, origin: $('m_origin').value, end: $('m_end').value, address: $('m_address').value,
+            company: $('m_company').value, manager: $('m_manager').value, cable_type: $('m_cable_type').value,
+            fiber_type: $('m_fiber_type').value, date: $('m_date').value }
+  };
+}
+
+async function upload(files) {
+  const fd = new FormData();
+  [...files].forEach(f => fd.append('files', f));
+  Object.assign(state, { names: {}, excluded: [], overrides: {}, fiber_numbers: {}, manual: [] });
+  fd.append('config', JSON.stringify(config()));
+  $('files').textContent = 'A processar...';
+  let d;
+  try {
+    const r = await fetch('/api/upload', { method: 'POST', body: fd });
+    d = await r.json();
+    if (!r.ok) { $('files').innerHTML = `<div class="warn">${esc(d.error)}</div>` + (d.errors || []).map(x => `<div class="warn">${esc(x)}</div>`).join(''); return; }
+  } catch (e) { $('files').innerHTML = `<div class="warn">Erro ao ler os ficheiros: ${esc(e)}</div>`; return; }
+  job = d.job;
+  $('m_cable').value = d.info.cable || ''; $('m_origin').value = d.info.origin || ''; $('m_end').value = d.info.end || '';
+  if (d.info.timestamp) $('m_date').value = new Date(d.info.timestamp * 1000).toISOString().slice(0, 10);
+  show(d);
+}
+
+async function reanalyse() {
+  if (!job) return;
+  const r = await fetch('/api/analyse/' + job, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config()) });
+  const d = await r.json();
+  if (!r.ok || d.error) { $('warnings').innerHTML = `<div class="warn">${esc(d.error)}</div>`; return; }
+  show(d);
+}
+$('btnApply').onclick = reanalyse;
+['mode', 'tol', 'auto_fill', 'detect', 'detect_threshold'].forEach(id => $(id).onchange = reanalyse);
+
+$('btnExport').onclick = async () => {
+  const r = await fetch('/api/export/' + job, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config()) });
+  if (!r.ok) { alert('Erro na exportação'); return; }
+  const blob = await r.blob();
+  const name = 'Dossier_' + ($('m_cable').value || 'cable') + '.xlsx';
+  const url = URL.createObjectURL(blob);
+  if (!touch) {
+    const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+    return;
+  }
+  // telemóvel: o Excel fica pronto e um toque guarda-o ou partilha-o (Dropbox, email...)
+  const file = new File([blob], name, { type: blob.type });
+  const box = $('saveBox');
+  box.innerHTML = `<a href="${url}" download="${esc(name)}">Guardar</a>`;
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    const b = document.createElement('button'); b.className = 'small'; b.textContent = 'Partilhar Excel';
+    b.onclick = () => navigator.share({ files: [file], title: name }).catch(() => {});
+    box.prepend(b);
+  }
+};
+
+function show(d) {
+  R = d;
+  ['btnExport', 'btnApply', 'btnAdd'].forEach(id => $(id).disabled = false);
+  renderFiles(); renderPoints(); renderTab(); renderTraceSel(); draw();
+}
+
+function renderFiles() {
+  $('files').innerHTML = `<div style="margin-bottom:4px">Modo detetado: <span class="pill">${R.mode === 'loop' ? 'bouclage' : 'OE / EO separados'}</span></div>` +
+    (R.files.length > 12 ? `<details><summary>${R.files.length} ficheiros (mostrar e corrigir nº de fibra)</summary>` : '') +
+    '<table><tr><th>Ficheiro</th><th>λ</th><th>Fibra</th></tr>' +
+    R.files.map(f => `<tr><td style="text-align:left">${esc(f.file)}</td><td>${Math.round(f.wl)}</td>
+      <td><input class="v" data-f="${esc(f.file)}" value="${f.fiber ?? ''}"></td></tr>`).join('') + '</table>' +
+    (R.files.length > 12 ? '</details>' : '') +
+    (R.errors || []).map(x => `<div class="warn">${esc(x)}</div>`).join('');
+  $('files').querySelectorAll('input').forEach(i => i.onchange = () => {
+    state.fiber_numbers[i.dataset.f] = i.value === '' ? null : parseInt(i.value); reanalyse();
+  });
+}
+
+function addManual(pos) {
+  state.manual.push(Math.round(pos * 10) / 10);
+  reanalyse();
+}
+
+function renderPoints() {
+  const total = R.segments.length;
+  let h = '<table><tr><th>#</th><th>Nome do ponto</th><th>Tipo</th><th>Dist. cum. (m)</th><th>Troço (m)</th><th>Marcado pelo OTDR</th><th>Calculado</th><th></th></tr>';
+  R.points.forEach((p, i) => {
+    h += `<tr><td>${i + 1}</td><td><input data-k="${p.key}" class="pn" style="width:260px" value="${esc(p.name)}"></td>
+      <td>${p.kind === 'connector' ? 'Connecteur' : 'Épissure'}${p.manual ? ' <span class="pill calc">manual</span>' : ''}</td>
+      <td>${fmt(p.cum_m, 2)}</td><td>${fmt(p.len_m, 2)}</td>
+      <td class="${p.hits < total ? 'miss' : ''}">${p.hits}/${total}</td>
+      <td class="${p.calc ? 'calc' : ''}">${p.calc || ''}</td>
+      <td>${p.manual ? `<button class="sec small" data-rm="${p.center}">Remover</button>` :
+                       `<button class="sec small" data-x="${p.center}" title="Ignorar este ponto (evento fantasma)">Ignorar</button>`}</td></tr>`;
+  });
+  h += '</table>';
+  if (R.removed_points.length) h += `<p class="muted">${R.removed_points.length} ponto(s) ignorado(s). <button class="sec small" id="restore">Repor todos</button></p>`;
+  $('points').innerHTML = h;
+  $('points').querySelectorAll('.pn').forEach(i => i.onchange = () => { state.names[i.dataset.k] = i.value; reanalyse(); });
+  $('points').querySelectorAll('[data-x]').forEach(b => b.onclick = () => { state.excluded.push(+b.dataset.x); reanalyse(); });
+  $('points').querySelectorAll('[data-rm]').forEach(b => b.onclick = () => {
+    const c = +b.dataset.rm;
+    state.manual = state.manual.filter(m => Math.abs(m - c) > (+R.tol || 20)); reanalyse();
+  });
+  const rs = $('restore'); if (rs) rs.onclick = () => { state.excluded = []; reanalyse(); };
+
+  const sg = R.suggestions || [];
+  $('sugg').innerHTML = sg.length ? `<h3 style="font-size:13px;margin:12px 0 4px">Possíveis eventos não marcados por nenhuma medida</h3>
+    <table><tr><th>Posição (m desde a origem)</th><th>Visto em</th><th></th></tr>` +
+    sg.map((s, i) => `<tr><td>${fmt(s.pos, 1)}</td><td style="text-align:left">${s.found_in.map(esc).join('<br>')}</td>
+      <td><button class="small" data-sg="${s.pos}">Adicionar</button></td></tr>`).join('') + '</table>' : '';
+  $('sugg').querySelectorAll('[data-sg]').forEach(b => b.onclick = () => addManual(+b.dataset.sg));
+  const w = R.warnings || [];
+  $('warnings').innerHTML = w.map(x => `<div class="warn">${esc(x)}</div>`).join('');
+}
+
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); tab = b.dataset.t; renderTab();
+});
+
+function lossCell(p, f, wl, d, c) {
+  let cls = c[d + '_out'] ? 'out' : c[d + '_edited'] ? 'edit' : c[d + '_calc'] ? 'calc' : c[d + '_missing'] ? 'miss' : '';
+  if (c[d + '_recalc']) cls += ' recalc';
+  const tip = c[d + '_calc'] ? 'Calculado na curva (LSA): o OTDR não marcou este evento'
+            : c[d + '_recalc'] ? `Recalculado (OTDR dava ${fmt(c[d + '_otdr'])} dB)` : '';
+  return `<td class="${cls}" title="${tip}"><input class="v ov" data-k="${p.key}|${f}|${wl}|${d}" value="${fmt(c[d])}"></td>`;
+}
+const outTd = (v, out, d = 3, bold = false) => `<td class="${out ? 'out' : ''}">${bold ? '<b>' : ''}${fmt(v, d)}${bold ? '</b>' : ''}</td>`;
+
+function renderTab() {
+  if (!R) return;
+  const wls = R.wls, fibers = R.fibers, diff = wls.includes(1310) && wls.includes(1550);
+  let h = '';
+  if (tab === 'splices') {
+    h = '<table><tr><th rowspan="2">Fibra</th>';
+    R.points.forEach(p => h += `<th colspan="${wls.length * 3 + (diff ? 1 : 0)}">${esc(p.name)}<br><span class="muted">${fmt(p.cum_m, 1)} m</span></th>`);
+    h += `<th colspan="${wls.length}">Média ép.</th><th colspan="${wls.length}">Bilan</th></tr><tr>`;
+    R.points.forEach(() => { wls.forEach(wl => h += `<th>${wl} OE</th><th>${wl} EO</th><th>Moy.</th>`); if (diff) h += '<th>Δ</th>'; });
+    wls.forEach(wl => h += `<th>${wl}</th>`); wls.forEach(wl => h += `<th>${wl}</th>`);
+    h += '</tr>';
+    fibers.forEach(f => {
+      h += `<tr><th>${f}</th>`;
+      R.points.forEach(p => {
+        wls.forEach(wl => { const c = p.data[`${f}|${wl}`];
+          h += lossCell(p, f, wl, 'OE', c) + lossCell(p, f, wl, 'EO', c) + outTd(c.avg, c.out, 3, true); });
+        if (diff) { const v = p.data[`${f}|diff`]; h += outTd(v, v !== null && v > R.thresholds.diff_1550_1310); }
+      });
+      wls.forEach(wl => h += `<td>${fmt(R.summary[`${f}|${wl}`].splice_mean, 4)}</td>`);
+      wls.forEach(wl => h += `<td><b>${fmt(R.summary[`${f}|${wl}`].budget)}</b></td>`);
+      h += '</tr>';
+    });
+    h += '</table>';
+  } else if (tab === 'slopes') {
+    h = '<table><tr><th rowspan="2">Fibra</th>';
+    R.sections.forEach(s => h += `<th colspan="${wls.length * 3}">Pente ${s.index}<br><span class="muted">${esc(s.from)} → ${esc(s.to)} · ${fmt(s.len_m, 1)} m</span></th>`);
+    h += `<th colspan="${wls.length}">Moyenne</th></tr><tr>`;
+    R.sections.forEach(() => wls.forEach(wl => h += `<th>${wl} OE</th><th>${wl} EO</th><th>Moy.</th>`));
+    wls.forEach(wl => h += `<th>${wl}</th>`); h += '</tr>';
+    fibers.forEach(f => {
+      h += `<tr><th>${f}</th>`;
+      R.sections.forEach(s => wls.forEach(wl => { const c = s.data[`${f}|${wl}`];
+        h += outTd(c.OE, c.OE_out) + outTd(c.EO, c.EO_out) + outTd(c.avg, c.out, 3, true); }));
+      wls.forEach(wl => h += `<td>${fmt(R.summary[`${f}|${wl}`].slope_mean)}</td>`);
+      h += '</tr>';
+    });
+    h += '</table>';
+  } else if (tab === 'refl') {
+    const conn = R.points.filter(p => p.kind === 'connector');
+    h = '<table><tr><th rowspan="2">Fibra</th>';
+    conn.forEach(p => h += `<th colspan="${wls.length * 2}">${esc(p.name)}</th>`);
+    h += '</tr><tr>'; conn.forEach(() => wls.forEach(wl => h += `<th>${wl} OE</th><th>${wl} EO</th>`)); h += '</tr>';
+    fibers.forEach(f => {
+      h += `<tr><th>${f}</th>`;
+      conn.forEach(p => wls.forEach(wl => { const c = p.data[`${f}|${wl}`];
+        h += outTd(c.OE_refl, c.OE_refl_out, 2) + outTd(c.EO_refl, c.EO_refl_out, 2); }));
+      h += '</tr>';
+    });
+    h += '</table>';
+  } else if (tab === 'out') {
+    const o = R.out;
+    const tbl = (t, heads, rows) => `<h3 style="font-size:13px;margin:10px 0 4px">${t}</h3>` + (rows.length ?
+      `<table><tr>${heads.map(x => `<th>${x}</th>`).join('')}</tr>${rows.map(r => `<tr>${r.map((x, i) => `<td class="${i === 2 ? 'out' : ''}">${typeof x === 'number' && !Number.isInteger(x) ? fmt(x) : esc(String(x))}</td>`).join('')}</tr>`).join('')}</table>` : '<p class="muted">Sem valores.</p>');
+    h = tbl('Connecteurs & épissures', ['Ponto', 'Fibra', 'Média (dB)', 'λ'], o.splices.map(x => [x.point, x.fiber, x.value, x.wl]))
+      + tbl('Pentes', ['Pente', 'Fibra', 'Média (dB/km)', 'λ'], o.slopes.map(x => [x.section, x.fiber, x.value, x.wl]))
+      + tbl('Réflectances', ['Ponto', 'Fibra', 'Valor (dB)', 'λ'], o.refl.map(x => [x.point, x.fiber, x.value, x.wl]))
+      + tbl('Écart 1550-1310', ['Ponto', 'Fibra', 'Écart (dB)'], o.diff.map(x => [x.point, x.fiber, x.value]));
+  } else if (tab === 'segs') {
+    h = '<table><tr><th>Ficheiro</th><th>Fibra</th><th>λ</th><th>Sentido</th><th>Comprimento (m)</th><th>Eventos OTDR</th><th>Calculados na curva</th><th>Sem valor</th></tr>' +
+      R.segments.map(s => `<tr><td style="text-align:left">${esc(s.file)}</td><td>${s.fiber}</td><td>${s.wl}</td><td>${s.dir}</td>
+        <td>${fmt(s.length, 2)}</td><td>${s.n_events}</td><td class="${s.calc.length ? 'calc' : ''}">${esc(s.calc.join(', '))}</td>
+        <td class="${s.missing.length ? 'miss' : ''}">${esc(s.missing.join(', '))}</td></tr>`).join('') + '</table>';
+  }
+  $('tab').innerHTML = h;
+  $('tab').querySelectorAll('.ov').forEach(i => i.onchange = () => {
+    state.overrides[i.dataset.k] = i.value === '' ? null : parseFloat(i.value.replace(',', '.')); reanalyse();
+  });
+}
+
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// ---------- gráfico ----------
+let view = null, dragX = null;
+function renderTraceSel() {
+  const sel = $('traceSel');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="all">Todos os traços</option>' +
+    R.traces.map((t, i) => `<option value="${i}">${esc(t.file)} (fibra ${t.fiber}, ${t.wl} nm)</option>`).join('');
+  if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+  sel.onchange = () => { view = null; draw(); };
+}
+
+$('btnAdd').onclick = () => {
+  addMode = !addMode;
+  $('btnAdd').classList.toggle('on', addMode);
+  $('chart').classList.toggle('add', addMode);
+  $('chartHelp').textContent = addMode ? 'Clique na curva no sítio do evento (escolha primeiro um traço).'
+                                       : 'Arrastar no gráfico para fazer zoom, duplo clique para repor.';
+};
+
+function draw() {
+  if (!R) return;
+  const cv = $('chart'), dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+  const sel = $('traceSel').value;
+  const list = sel === 'all' ? R.traces.map((t, i) => [t, i]) : [[R.traces[+sel], +sel]];
+  const xmaxAll = Math.max(...list.map(([t]) => t.events.length ? t.events[t.events.length - 1].pos * 1.08 : t.y.length * t.res));
+  const v = view || { x0: 0, x1: xmaxAll };
+  let ymin = Infinity, ymax = -Infinity;
+  list.forEach(([t]) => t.y.forEach((y, i) => { const x = i * t.res; if (x >= v.x0 && x <= v.x1 && y > -60) { ymin = Math.min(ymin, y); ymax = Math.max(ymax, y); } }));
+  if (!isFinite(ymin)) { ymin = -40; ymax = 0; }
+  const pad = (ymax - ymin) * 0.05 + 0.1; ymin -= pad; ymax += pad;
+  const L = 50, B = 26, T = 8, Rr = 10;
+  const X = x => L + (x - v.x0) / (v.x1 - v.x0) * (W - L - Rr);
+  const Y = y => T + (ymax - y) / (ymax - ymin) * (H - T - B);
+  g.strokeStyle = '#e5e9ef'; g.fillStyle = '#66727f'; g.font = '11px system-ui'; g.lineWidth = 1;
+  const nx = W < 500 ? 3 : 8;
+  for (let k = 0; k <= nx; k++) {
+    const x = v.x0 + (v.x1 - v.x0) * k / nx; g.beginPath(); g.moveTo(X(x), T); g.lineTo(X(x), H - B); g.stroke();
+    g.textAlign = k === 0 ? 'left' : k === nx ? 'right' : 'center';
+    g.fillText((x / 1000).toFixed(3) + ' km', X(x), H - 8);
+  }
+  g.textAlign = 'left';
+  for (let k = 0; k <= 5; k++) {
+    const y = ymin + (ymax - ymin) * k / 5; g.beginPath(); g.moveTo(L, Y(y)); g.lineTo(W - Rr, Y(y)); g.stroke();
+    g.fillText(y.toFixed(1), 6, Y(y) + 4);
+  }
+  g.save(); g.beginPath(); g.rect(L, T, W - L - Rr, H - T - B); g.clip();
+  list.forEach(([t, idx]) => {
+    const col = COLORS[idx % COLORS.length];
+    g.strokeStyle = col; g.lineWidth = 1.2; g.beginPath();
+    t.y.forEach((y, i) => { const x = i * t.res; i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y)); });
+    g.stroke();
+    t.events.forEach((e, k) => {
+      g.strokeStyle = col; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(X(e.pos), T); g.lineTo(X(e.pos), H - B); g.stroke(); g.setLineDash([]);
+      if (list.length === 1) { g.fillStyle = col; g.fillText(`${k + 1}: ${e.loss == null ? "?" : e.loss.toFixed(3)} dB`, X(e.pos) + 3, T + 12 + (k % 3) * 12); }
+    });
+    (t.calc || []).forEach((e, k) => {
+      g.strokeStyle = '#15803d'; g.lineWidth = 2; g.beginPath(); g.moveTo(X(e.pos), T); g.lineTo(X(e.pos), H - B); g.stroke(); g.lineWidth = 1.2;
+      if (list.length === 1) { g.fillStyle = '#15803d'; g.fillText(`calc: ${e.loss == null ? "?" : e.loss.toFixed(3)} dB`, X(e.pos) + 3, H - B - 8 - (k % 3) * 12); }
+    });
+  });
+  g.restore();
+  if (dragX) { g.fillStyle = 'rgba(31,78,121,.12)'; g.fillRect(Math.min(dragX[0], dragX[1]), T, Math.abs(dragX[1] - dragX[0]), H - T - B); }
+  $('legend').innerHTML = list.length > 8 ? `<span>${list.length} traços (escolher um na lista para ver os valores)</span><span><i style="background:#15803d"></i>evento calculado pela app</span>` : list.map(([t, idx]) => `<span><i style="background:${COLORS[idx % COLORS.length]}"></i>${esc(t.file)}</span>`).join('') +
+    '<span><i style="background:#15803d"></i>evento calculado pela app</span>';
+  cv._inv = px => v.x0 + (px - L) / (W - L - Rr) * (v.x1 - v.x0);
+}
+
+function clickAdd(px) {
+  const sel = $('traceSel').value;
+  if (sel === 'all') { alert('Escolha primeiro um traço na lista para adicionar o evento.'); return; }
+  const t = R.traces[+sel];
+  const raw = $('chart')._inv(px);
+  const seg = R.segments.find(s => s.file === t.file && raw >= s.lo - 5 && raw <= s.hi + 5);
+  if (!seg) { alert('Esse ponto está fora da fibra medida (bobine amorce ou fim).'); return; }
+  addManual((raw - seg.o_raw) * seg.sign);
+}
+
+const cv = $('chart');
+// eventos de ponteiro: rato e dedo (arrastar na horizontal faz zoom, na vertical deixa a página deslizar)
+cv.onpointerdown = e => { if (!addMode) { dragX = [e.offsetX, e.offsetX]; cv.setPointerCapture(e.pointerId); } };
+cv.onpointermove = e => { if (dragX) { dragX[1] = e.offsetX; draw(); } };
+cv.onpointercancel = () => { dragX = null; draw(); };
+cv.onpointerup = e => {
+  if (addMode) { clickAdd(e.offsetX); return; }
+  if (dragX && Math.abs(dragX[1] - dragX[0]) > 5) {
+    const a = cv._inv(Math.min(dragX[0], dragX[1])), b = cv._inv(Math.max(dragX[0], dragX[1]));
+    view = { x0: Math.max(0, a), x1: b };
+  }
+  dragX = null; draw();
+};
+cv.ondblclick = () => { view = null; draw(); };
+$('btnZoom').onclick = () => { view = null; draw(); };
+window.onresize = draw;
+</script>
+</body>
+</html>
