@@ -164,7 +164,7 @@ def build_segments(traces, mode='auto', pairs=None):
     loop_kind = 'direct' if n_direct >= n_bob else 'bobine'
     if mode == 'auto':
         loops = [k is not None for k in kinds]
-        mode = 'loop' if loops and sum(loops) * 2 >= len(loops) and len(fibers) % 2 == 0 else 'direct'
+        mode = 'loop' if loops and sum(loops) * 2 >= len(loops) else 'direct'
     if pairs is None:
         pairs = {}
         for a, b in zip(fibers[0::2], fibers[1::2]):
@@ -212,8 +212,7 @@ def build_segments(traces, mode='auto', pairs=None):
             fa = t.fiber_number
             fb = pairs.get(fa)
             if fb is None:
-                warnings.append(f'{t.filename}: fibra {fa} sem parceira de bouclage.')
-                continue
+                warnings.append(f'{t.filename}: fibra {fa} sem parceira de bouclage, só o sentido OE é usado.')
             la, lb = loop_idx
             shared = la == lb  # bouclage direto: um só evento para as duas fibras
             o, loop_a, loop_b, o2 = evs[0], evs[la], evs[lb], evs[-1]
@@ -225,6 +224,9 @@ def build_segments(traces, mode='auto', pairs=None):
                 if shared and i == la and first_of_pair[fa] != fa:
                     ev.update(loss=None, refl=None)  # bouclage atribuído à primeira fibra do par
                 seg_a.events.append(ev)
+            segments.append(seg_a)
+            if fb is None:
+                continue
             seg_b = Segment(fb, wl, 'EO', t.filename, o2.distance_m - loop_b.distance_m, o2.distance_m, -1,
                             trace=t, curve=_curve(t))
             for i in range(lb, len(evs)):
@@ -234,7 +236,7 @@ def build_segments(traces, mode='auto', pairs=None):
                     ev.update(loss=None, refl=None)
                 seg_b.events.append(ev)
             seg_b.events.reverse()
-            segments += [seg_a, seg_b]
+            segments.append(seg_b)
         else:
             origins = [x.origin for x in traces if x.origin]
             majority = max(set(origins), key=origins.count) if origins else ''
@@ -484,7 +486,8 @@ def analyse(traces, mode='auto', tol=20.0, thresholds=None, point_names=None, ex
     manual = [float(m) for m in (manual_points or [])]
     clusters = cluster_points(segments, tol, manual)
     excl = [float(x) for x in (excluded or [])]
-    removed = [c for c in clusters if any(abs(c['center'] - x) <= 1.0 for x in excl)]
+    # um ponto acrescentado à mão prevalece sobre um "Ignorar" anterior no mesmo sítio
+    removed = [c for c in clusters if not c['manual'] and any(abs(c['center'] - x) <= 1.0 for x in excl)]
     clusters = [c for c in clusters if c not in removed]
     centers = [c['center'] for c in clusters]
     assign(segments, centers, tol)

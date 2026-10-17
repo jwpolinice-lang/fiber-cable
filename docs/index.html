@@ -50,8 +50,10 @@
   .tabs { display:flex; gap:4px; margin-bottom:8px; flex-wrap:wrap; }
   .tabs button { background:#e7edf5; color:var(--acc); }
   .tabs button.on { background:var(--acc); color:#fff; }
-  #chart { width:100%; height:360px; display:block; background:#fff; cursor:crosshair; touch-action:pan-y; }
-  #chart.add { cursor:copy; }
+  #chartBox { position:relative; }
+  #chart { width:100%; height:360px; display:block; background:#fff; }
+  #chartTop { position:absolute; inset:0; width:100%; height:100%; cursor:crosshair; touch-action:pan-y; }
+  #chart.add + #chartTop { cursor:copy; }
   .muted { color:var(--muted); font-size:12px; }
   .warn { color:#9a3412; font-size:12px; overflow-wrap:anywhere; }
   .legend span { display:inline-block; margin-right:12px; font-size:12px; }
@@ -70,6 +72,9 @@
   #saveBox { display:flex; gap:6px; align-items:center; }
   #saveBox a { color:#fff; font-size:13px; }
   #engine { font-size:12px; color:#c9d6e6; }
+  #busy { position:fixed; top:12px; left:50%; transform:translateX(-50%); z-index:20; background:#1d2733; color:#fff;
+          padding:8px 16px; border-radius:20px; font-size:14px; box-shadow:0 2px 8px rgba(0,0,0,.25); }
+  [hidden] { display:none !important; }
   /* telemóvel */
   @media (max-width: 700px) {
     header { padding:8px 12px; gap:8px; flex-wrap:wrap; }
@@ -96,9 +101,11 @@
   <span class="muted sub" style="color:#c9d6e6">Pós-processamento OTDR (.sor)</span>
   <span id="engine"></span>
   <span class="sp"></span>
+  <button id="btnReset" class="sec" disabled>Repor</button>
   <button id="btnExport" class="sec" disabled>Exportar Excel</button>
   <span id="saveBox"></span>
 </header>
+<div id="busy" hidden>A calcular...</div>
 <main>
   <div>
     <div class="card">
@@ -153,7 +160,7 @@
         <button id="btnZoom" class="sec small">Repor zoom</button>
         <span class="muted" id="chartHelp">Arrastar no gráfico para fazer zoom, duplo clique para repor.</span>
       </div>
-      <canvas id="chart"></canvas>
+      <div id="chartBox"><canvas id="chart"></canvas><canvas id="chartTop"></canvas></div>
       <div id="legend" class="legend"></div>
     </div>
     <div class="card">
@@ -172,7 +179,7 @@
       </div>
       <div id="tab" class="scroll"></div>
       <p class="muted key">
-        <span><b style="background:var(--out)"></b>fora do limiar</span>
+        <span><b style="background:var(--out)"></b>média fora do limiar</span>
         <span><b style="background:var(--calc)"></b>calculado na curva (OTDR não marcou)</span>
         <span><b style="background:var(--miss)"></b>sem valor</span>
         <span><b style="background:var(--edit)"></b>corrigido à mão</span>
@@ -228,30 +235,54 @@ async function upload(files) {
   $('files').textContent = 'A processar...';
   let d;
   try {
-    const r = await fetch('/api/upload', { method: 'POST', body: fd });
+    const r = await busy(() => fetch('/api/upload', { method: 'POST', body: fd }));
     d = await r.json();
-    if (!r.ok) { $('files').innerHTML = `<div class="warn">${esc(d.error)}</div>` + (d.errors || []).map(x => `<div class="warn">${esc(x)}</div>`).join(''); return; }
-  } catch (e) { $('files').innerHTML = `<div class="warn">Erro ao ler os ficheiros: ${esc(e)}</div>`; return; }
+    if (!r.ok) { $('files').innerHTML = `<div class="warn">${esc(d.error)}</div>` + (d.errors || []).map(x => `<div class="warn">${esc(x)}</div>`).join(''); $('btnReset').disabled = false; return; }
+  } catch (e) { $('files').innerHTML = `<div class="warn">Erro ao ler os ficheiros: ${esc(e)}</div>`; $('btnReset').disabled = false; return; }
   job = d.job;
   $('m_cable').value = d.info.cable || ''; $('m_origin').value = d.info.origin || ''; $('m_end').value = d.info.end || '';
   if (d.info.timestamp) $('m_date').value = new Date(d.info.timestamp * 1000).toISOString().slice(0, 10);
   show(d);
 }
 
+let busyN = 0;
+async function busy(fn) {
+  busyN++; $('busy').hidden = false; document.body.style.cursor = 'progress';
+  try { return await fn(); }
+  finally { if (--busyN === 0) { $('busy').hidden = true; document.body.style.cursor = ''; } }
+}
+
 async function reanalyse() {
   if (!job) return;
-  const r = await fetch('/api/analyse/' + job, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config()) });
-  const d = await r.json();
-  if (!r.ok || d.error) { $('warnings').innerHTML = `<div class="warn">${esc(d.error)}</div>`; return; }
-  show(d);
+  await busy(async () => {
+    const r = await fetch('/api/analyse/' + job, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config()) });
+    const d = await r.json();
+    if (!r.ok || d.error) { $('warnings').innerHTML = `<div class="warn">${esc(d.error)}</div>`; return; }
+    show(d);
+  });
 }
+
+// limpa ficheiros, resultados e correções para recomeçar (os limiares ficam)
+$('btnReset').onclick = () => {
+  if (!confirm('Limpar os ficheiros e os resultados e recomeçar?')) return;
+  R = null; job = null; view = null; geo = null; dragX = null;
+  if (addMode) $('btnAdd').onclick();
+  Object.assign(state, { names: {}, excluded: [], overrides: {}, fiber_numbers: {}, manual: [] });
+  $('file').value = '';
+  $('files').innerHTML = ''; $('points').textContent = 'Carregue os ficheiros .sor para começar.';
+  ['sugg', 'warnings', 'tab', 'legend', 'saveBox', 'traceSel'].forEach(id => $(id).innerHTML = '');
+  ['m_cable', 'm_origin', 'm_end', 'm_address', 'm_company', 'm_manager', 'm_cable_type', 'm_fiber_type', 'm_date'].forEach(id => $(id).value = '');
+  ['btnExport', 'btnApply', 'btnAdd', 'btnReset'].forEach(id => $(id).disabled = true);
+  ['chart', 'chartTop'].forEach(id => { const c = $(id); c.getContext('2d').clearRect(0, 0, c.width, c.height); });
+  window.scrollTo(0, 0);
+};
 $('btnApply').onclick = reanalyse;
 ['mode', 'tol', 'auto_fill', 'detect', 'detect_threshold'].forEach(id => $(id).onchange = reanalyse);
 
 $('btnExport').onclick = async () => {
-  const r = await fetch('/api/export/' + job, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config()) });
+  const r = await busy(() => fetch('/api/export/' + job, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config()) }));
   if (!r.ok) { alert('Erro na exportação'); return; }
-  const blob = await r.blob();
+  const blob = await busy(() => r.blob());
   const name = 'Dossier_' + ($('m_cable').value || 'cable') + '.xlsx';
   const url = URL.createObjectURL(blob);
   if (!touch) {
@@ -271,7 +302,7 @@ $('btnExport').onclick = async () => {
 
 function show(d) {
   R = d;
-  ['btnExport', 'btnApply', 'btnAdd'].forEach(id => $(id).disabled = false);
+  ['btnExport', 'btnApply', 'btnAdd', 'btnReset'].forEach(id => $(id).disabled = false);
   renderFiles(); renderPoints(); renderTab(); renderTraceSel(); draw();
 }
 
@@ -289,6 +320,9 @@ function renderFiles() {
 }
 
 function addManual(pos) {
+  const tol = +R.tol || 20;
+  // acrescentar um evento anula um "Ignorar" feito antes no mesmo sítio
+  state.excluded = state.excluded.filter(x => Math.abs(x - pos) > tol);
   state.manual.push(Math.round(pos * 10) / 10);
   reanalyse();
 }
@@ -332,7 +366,7 @@ document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
 });
 
 function lossCell(p, f, wl, d, c) {
-  let cls = c[d + '_out'] ? 'out' : c[d + '_edited'] ? 'edit' : c[d + '_calc'] ? 'calc' : c[d + '_missing'] ? 'miss' : '';
+  let cls = c[d + '_edited'] ? 'edit' : c[d + '_calc'] ? 'calc' : c[d + '_missing'] ? 'miss' : '';
   if (c[d + '_recalc']) cls += ' recalc';
   const tip = c[d + '_calc'] ? 'Calculado na curva (LSA): o OTDR não marcou este evento'
             : c[d + '_recalc'] ? `Recalculado (OTDR dava ${fmt(c[d + '_otdr'])} dB)` : '';
@@ -356,7 +390,7 @@ function renderTab() {
       R.points.forEach(p => {
         wls.forEach(wl => { const c = p.data[`${f}|${wl}`];
           h += lossCell(p, f, wl, 'OE', c) + lossCell(p, f, wl, 'EO', c) + outTd(c.avg, c.out, 3, true); });
-        if (diff) { const v = p.data[`${f}|diff`]; h += outTd(v, v !== null && v > R.thresholds.diff_1550_1310); }
+        if (diff) { const v = p.data[`${f}|diff`]; h += outTd(v, false); }
       });
       wls.forEach(wl => h += `<td>${fmt(R.summary[`${f}|${wl}`].splice_mean, 4)}</td>`);
       wls.forEach(wl => h += `<td><b>${fmt(R.summary[`${f}|${wl}`].budget)}</b></td>`);
@@ -372,7 +406,7 @@ function renderTab() {
     fibers.forEach(f => {
       h += `<tr><th>${f}</th>`;
       R.sections.forEach(s => wls.forEach(wl => { const c = s.data[`${f}|${wl}`];
-        h += outTd(c.OE, c.OE_out) + outTd(c.EO, c.EO_out) + outTd(c.avg, c.out, 3, true); }));
+        h += outTd(c.OE, false) + outTd(c.EO, false) + outTd(c.avg, c.out, 3, true); }));
       wls.forEach(wl => h += `<td>${fmt(R.summary[`${f}|${wl}`].slope_mean)}</td>`);
       h += '</tr>';
     });
@@ -385,14 +419,14 @@ function renderTab() {
     fibers.forEach(f => {
       h += `<tr><th>${f}</th>`;
       conn.forEach(p => wls.forEach(wl => { const c = p.data[`${f}|${wl}`];
-        h += outTd(c.OE_refl, c.OE_refl_out, 2) + outTd(c.EO_refl, c.EO_refl_out, 2); }));
+        h += outTd(c.OE_refl, false, 2) + outTd(c.EO_refl, false, 2); }));
       h += '</tr>';
     });
     h += '</table>';
   } else if (tab === 'out') {
     const o = R.out;
     const tbl = (t, heads, rows) => `<h3 style="font-size:13px;margin:10px 0 4px">${t}</h3>` + (rows.length ?
-      `<table><tr>${heads.map(x => `<th>${x}</th>`).join('')}</tr>${rows.map(r => `<tr>${r.map((x, i) => `<td class="${i === 2 ? 'out' : ''}">${typeof x === 'number' && !Number.isInteger(x) ? fmt(x) : esc(String(x))}</td>`).join('')}</tr>`).join('')}</table>` : '<p class="muted">Sem valores.</p>');
+      `<table><tr>${heads.map(x => `<th>${x}</th>`).join('')}</tr>${rows.map(r => `<tr>${r.map((x, i) => `<td>${typeof x === 'number' && !Number.isInteger(x) ? fmt(x) : esc(String(x))}</td>`).join('')}</tr>`).join('')}</table>` : '<p class="muted">Sem valores.</p>');
     h = tbl('Connecteurs & épissures', ['Ponto', 'Fibra', 'Média (dB)', 'λ'], o.splices.map(x => [x.point, x.fiber, x.value, x.wl]))
       + tbl('Pentes', ['Pente', 'Fibra', 'Média (dB/km)', 'λ'], o.slopes.map(x => [x.section, x.fiber, x.value, x.wl]))
       + tbl('Réflectances', ['Ponto', 'Fibra', 'Valor (dB)', 'λ'], o.refl.map(x => [x.point, x.fiber, x.value, x.wl]))
@@ -412,7 +446,12 @@ function renderTab() {
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 // ---------- gráfico ----------
-let view = null, dragX = null;
+// eixo horizontal: 0 km no conector de início da fibra medida (depois da bobine amorce); cada traço tem o seu deslocamento
+let view = null, dragX = null, geo = null;
+const offsetOf = t => {
+  const lo = R.segments.filter(s => s.file === t.file).map(s => s.lo);
+  return lo.length ? Math.min(...lo) : 0;
+};
 function renderTraceSel() {
   const sel = $('traceSel');
   const prev = sel.value;
@@ -422,13 +461,14 @@ function renderTraceSel() {
   sel.onchange = () => { view = null; draw(); };
 }
 
+const HELP = 'Arrastar no gráfico para fazer zoom, duplo clique para repor. 0 km = conector depois da bobine.';
 $('btnAdd').onclick = () => {
   addMode = !addMode;
   $('btnAdd').classList.toggle('on', addMode);
   $('chart').classList.toggle('add', addMode);
-  $('chartHelp').textContent = addMode ? 'Clique na curva no sítio do evento (escolha primeiro um traço).'
-                                       : 'Arrastar no gráfico para fazer zoom, duplo clique para repor.';
+  $('chartHelp').textContent = addMode ? 'Clique na curva no sítio do evento (escolha primeiro um traço).' : HELP;
 };
+$('chartHelp').textContent = HELP;
 
 function draw() {
   if (!R) return;
@@ -438,11 +478,12 @@ function draw() {
   const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, W, H);
   const sel = $('traceSel').value;
-  const list = sel === 'all' ? R.traces.map((t, i) => [t, i]) : [[R.traces[+sel], +sel]];
-  const xmaxAll = Math.max(...list.map(([t]) => t.events.length ? t.events[t.events.length - 1].pos * 1.08 : t.y.length * t.res));
-  const v = view || { x0: 0, x1: xmaxAll };
+  const list = (sel === 'all' ? R.traces.map((t, i) => [t, i]) : [[R.traces[+sel], +sel]]).map(([t, i]) => [t, i, offsetOf(t)]);
+  const xmin = Math.min(...list.map(([, , o]) => -o));
+  const xmax = Math.max(...list.map(([t, , o]) => (t.events.length ? t.events[t.events.length - 1].pos : t.y.length * t.res) - o));
+  const v = view || { x0: xmin, x1: xmax + (xmax - xmin) * 0.04 };
   let ymin = Infinity, ymax = -Infinity;
-  list.forEach(([t]) => t.y.forEach((y, i) => { const x = i * t.res; if (x >= v.x0 && x <= v.x1 && y > -60) { ymin = Math.min(ymin, y); ymax = Math.max(ymax, y); } }));
+  list.forEach(([t, , o]) => t.y.forEach((y, i) => { const x = i * t.res - o; if (x >= v.x0 && x <= v.x1 && y > -60) { ymin = Math.min(ymin, y); ymax = Math.max(ymax, y); } }));
   if (!isFinite(ymin)) { ymin = -40; ymax = 0; }
   const pad = (ymax - ymin) * 0.05 + 0.1; ymin -= pad; ymax += pad;
   const L = 50, B = 26, T = 8, Rr = 10;
@@ -461,49 +502,77 @@ function draw() {
     g.fillText(y.toFixed(1), 6, Y(y) + 4);
   }
   g.save(); g.beginPath(); g.rect(L, T, W - L - Rr, H - T - B); g.clip();
-  list.forEach(([t, idx]) => {
+  if (v.x0 < 0 && v.x1 > 0) { g.strokeStyle = '#1f4e79'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(X(0), T); g.lineTo(X(0), H - B); g.stroke(); }
+  list.forEach(([t, idx, o]) => {
     const col = COLORS[idx % COLORS.length];
     g.strokeStyle = col; g.lineWidth = 1.2; g.beginPath();
-    t.y.forEach((y, i) => { const x = i * t.res; i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y)); });
+    t.y.forEach((y, i) => { const x = i * t.res - o; i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y)); });
     g.stroke();
     t.events.forEach((e, k) => {
-      g.strokeStyle = col; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(X(e.pos), T); g.lineTo(X(e.pos), H - B); g.stroke(); g.setLineDash([]);
-      if (list.length === 1) { g.fillStyle = col; g.fillText(`${k + 1}: ${e.loss == null ? "?" : e.loss.toFixed(3)} dB`, X(e.pos) + 3, T + 12 + (k % 3) * 12); }
+      const x = X(e.pos - o);
+      g.strokeStyle = col; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(x, T); g.lineTo(x, H - B); g.stroke(); g.setLineDash([]);
+      if (list.length === 1) { g.fillStyle = col; g.fillText(`${k + 1}: ${e.loss == null ? "?" : e.loss.toFixed(3)} dB`, x + 3, T + 12 + (k % 3) * 12); }
     });
     (t.calc || []).forEach((e, k) => {
-      g.strokeStyle = '#15803d'; g.lineWidth = 2; g.beginPath(); g.moveTo(X(e.pos), T); g.lineTo(X(e.pos), H - B); g.stroke(); g.lineWidth = 1.2;
-      if (list.length === 1) { g.fillStyle = '#15803d'; g.fillText(`calc: ${e.loss == null ? "?" : e.loss.toFixed(3)} dB`, X(e.pos) + 3, H - B - 8 - (k % 3) * 12); }
+      const x = X(e.pos - o);
+      g.strokeStyle = '#15803d'; g.lineWidth = 2; g.beginPath(); g.moveTo(x, T); g.lineTo(x, H - B); g.stroke(); g.lineWidth = 1.2;
+      if (list.length === 1) { g.fillStyle = '#15803d'; g.fillText(`calc: ${e.loss == null ? "?" : e.loss.toFixed(3)} dB`, x + 3, H - B - 8 - (k % 3) * 12); }
     });
   });
   g.restore();
-  if (dragX) { g.fillStyle = 'rgba(31,78,121,.12)'; g.fillRect(Math.min(dragX[0], dragX[1]), T, Math.abs(dragX[1] - dragX[0]), H - T - B); }
   $('legend').innerHTML = list.length > 8 ? `<span>${list.length} traços (escolher um na lista para ver os valores)</span><span><i style="background:#15803d"></i>evento calculado pela app</span>` : list.map(([t, idx]) => `<span><i style="background:${COLORS[idx % COLORS.length]}"></i>${esc(t.file)}</span>`).join('') +
     '<span><i style="background:#15803d"></i>evento calculado pela app</span>';
-  cv._inv = px => v.x0 + (px - L) / (W - L - Rr) * (v.x1 - v.x0);
+  geo = { W, H, L, B, T, Rr, v, trace: list.length === 1 ? list[0][0] : null, off: list.length === 1 ? list[0][2] : 0 };
+  overlay(null);
+}
+const inv = px => geo.v.x0 + (px - geo.L) / (geo.W - geo.L - geo.Rr) * (geo.v.x1 - geo.v.x0);
+
+// camada por cima do gráfico: linha e km debaixo do rato, retângulo do zoom (sem redesenhar os traços)
+function overlay(px) {
+  const c = $('chartTop'), dpr = window.devicePixelRatio || 1;
+  if (!geo) return;
+  const { W, H, L, B, T, Rr } = geo;
+  c.width = W * dpr; c.height = H * dpr;
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (dragX) { g.fillStyle = 'rgba(31,78,121,.12)'; g.fillRect(Math.min(dragX[0], dragX[1]), T, Math.abs(dragX[1] - dragX[0]), H - T - B); }
+  if (px == null || px < L || px > W - Rr) return;
+  const x = inv(px);
+  let txt = (x / 1000).toFixed(3) + ' km';
+  if (geo.trace) {
+    const raw = x + geo.off;
+    const seg = R.segments.find(s => s.file === geo.trace.file && raw >= s.lo - 5 && raw <= s.hi + 5);
+    if (seg && seg.dir === 'EO') txt += ` · fibra ${seg.fiber} EO a ${(((raw - seg.o_raw) * seg.sign) / 1000).toFixed(3)} km de O`;
+    else if (!seg) txt += ' · fora da fibra';
+  }
+  g.strokeStyle = addMode ? '#15803d' : '#1f4e79'; g.lineWidth = 1; g.setLineDash([4, 3]);
+  g.beginPath(); g.moveTo(px, T); g.lineTo(px, H - B); g.stroke(); g.setLineDash([]);
+  g.font = 'bold 12px system-ui';
+  const w = g.measureText(txt).width + 10, bx = Math.min(Math.max(px - w / 2, L), W - Rr - w);
+  g.fillStyle = addMode ? '#15803d' : '#1f4e79'; g.fillRect(bx, T, w, 18);
+  g.fillStyle = '#fff'; g.fillText(txt, bx + 5, T + 13);
 }
 
 function clickAdd(px) {
-  const sel = $('traceSel').value;
-  if (sel === 'all') { alert('Escolha primeiro um traço na lista para adicionar o evento.'); return; }
-  const t = R.traces[+sel];
-  const raw = $('chart')._inv(px);
-  const seg = R.segments.find(s => s.file === t.file && raw >= s.lo - 5 && raw <= s.hi + 5);
+  if (!geo.trace) { alert('Escolha primeiro um traço na lista para adicionar o evento.'); return; }
+  const raw = inv(px) + geo.off;
+  const seg = R.segments.find(s => s.file === geo.trace.file && raw >= s.lo - 5 && raw <= s.hi + 5);
   if (!seg) { alert('Esse ponto está fora da fibra medida (bobine amorce ou fim).'); return; }
   addManual((raw - seg.o_raw) * seg.sign);
 }
 
-const cv = $('chart');
+const cv = $('chartTop');
 // eventos de ponteiro: rato e dedo (arrastar na horizontal faz zoom, na vertical deixa a página deslizar)
 cv.onpointerdown = e => { if (!addMode) { dragX = [e.offsetX, e.offsetX]; cv.setPointerCapture(e.pointerId); } };
-cv.onpointermove = e => { if (dragX) { dragX[1] = e.offsetX; draw(); } };
-cv.onpointercancel = () => { dragX = null; draw(); };
+cv.onpointermove = e => { if (dragX) dragX[1] = e.offsetX; overlay(e.offsetX); };
+cv.onpointerleave = () => { if (!dragX) overlay(null); };
+cv.onpointercancel = () => { dragX = null; overlay(null); };
 cv.onpointerup = e => {
-  if (addMode) { clickAdd(e.offsetX); return; }
+  if (addMode) { if (R) clickAdd(e.offsetX); return; }
   if (dragX && Math.abs(dragX[1] - dragX[0]) > 5) {
-    const a = cv._inv(Math.min(dragX[0], dragX[1])), b = cv._inv(Math.max(dragX[0], dragX[1]));
-    view = { x0: Math.max(0, a), x1: b };
+    view = { x0: inv(Math.min(dragX[0], dragX[1])), x1: inv(Math.max(dragX[0], dragX[1])) };
+    dragX = null; draw(); return;
   }
-  dragX = null; draw();
+  dragX = null; overlay(e.offsetX);
 };
 cv.ondblclick = () => { view = null; draw(); };
 $('btnZoom').onclick = () => { view = null; draw(); };

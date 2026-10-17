@@ -12,8 +12,6 @@ HEAD_FILL = PatternFill('solid', fgColor='1F4E79')
 SUB_FILL = PatternFill('solid', fgColor='D9E2F3')
 OUT_FILL = PatternFill('solid', fgColor='FFC7CE')
 OUT_FONT = Font(bold=True, color='C00000', size=10)
-CALC_FONT = Font(italic=True, color='1F4E79', size=10)
-MISS_FILL = PatternFill('solid', fgColor='FFF2CC')
 CENTER = Alignment(horizontal='center', vertical='center', wrap_text=True)
 NUM3 = '0.000'
 NUM2 = '0.00'
@@ -51,14 +49,11 @@ def _header(ws, meta, title, width):
     _merge(ws, 7, 2, 7, width, title, bold=True, fill=HEAD_FILL, color='FFFFFF', size=12)
 
 
-def _val(ws, r, c, v, fmt=NUM3, out=False, missing=False, calc=False):
-    """Valor numérico: a vermelho quando ultrapassa o limiar, itálico azul quando calculado na curva."""
-    fill = OUT_FILL if out else (MISS_FILL if missing else None)
-    cell = _cell(ws, r, c, v, fmt=fmt, fill=fill)
+def _val(ws, r, c, v, fmt=NUM3, out=False):
+    """Valor numérico. Só as médias OE/EO fora do limiar levam cor (vermelho), a pedido do João."""
+    cell = _cell(ws, r, c, v, fmt=fmt, fill=OUT_FILL if out else None)
     if out:
         cell.font = OUT_FONT
-    elif calc:
-        cell.font = CALC_FONT
     return cell
 
 
@@ -201,12 +196,12 @@ def build_workbook(res, meta):
             for j, wl in enumerate(wls):
                 d = p['data'][f'{f}|{wl}']
                 cc = c0 + 3 * j
-                _val(ws, r, cc, d['OE'], missing=d['OE_missing'], out=d.get('OE_out'), calc=d.get('OE_calc'))
-                _val(ws, r, cc + 1, d['EO'], missing=d['EO_missing'], out=d.get('EO_out'), calc=d.get('EO_calc'))
+                _val(ws, r, cc, d['OE'])
+                _val(ws, r, cc + 1, d['EO'])
                 _val(ws, r, cc + 2, d['avg'], out=d['out'])
             if has_diff:
                 dv = p['data'].get(f'{f}|diff')
-                _val(ws, r, c0 + block - 1, dv, out=dv is not None and dv > th['diff_1550_1310'])
+                _val(ws, r, c0 + block - 1, dv)
         for j, wl in enumerate(wls):
             s = res['summary'][f'{f}|{wl}']
             _val(ws, r, cs + j, s['splice_mean'], fmt='0.0000')
@@ -220,10 +215,6 @@ def build_workbook(res, meta):
             vals = [p['data'][f'{f}|{wl}']['avg'] for f in fibers if p['data'][f'{f}|{wl}']['avg'] is not None]
             if vals:
                 _cell(ws, r, c0 + 3 * j + 2, sum(vals) / len(vals), fmt='0.0000', bold=True)
-    if any(p['data'][f'{f}|{wl}'].get(d + '_calc') for p in points for f in fibers for wl in wls for d in ('OE', 'EO')):
-        note = _cell(ws, r + 2, 1, 'Valeurs en italique bleu : événement non détecté par le réflectomètre, '
-                     'perte calculée sur la courbe (méthode 2 points LSA).', border=False, align=Alignment(horizontal='left'))
-        note.font = CALC_FONT
     ws.column_dimensions['A'].width = 15
     for c in range(2, ncols + 1):
         ws.column_dimensions[get_column_letter(c)].width = 9
@@ -251,8 +242,8 @@ def build_workbook(res, meta):
             c0 = 2 + i * 2 * len(wls)
             for j, wl in enumerate(wls):
                 d = p['data'][f'{f}|{wl}']
-                _val(ws, r, c0 + 2 * j, d['OE_refl'], fmt=NUM2, out=d.get('OE_refl_out'))
-                _val(ws, r, c0 + 2 * j + 1, d['EO_refl'], fmt=NUM2, out=d.get('EO_refl_out'))
+                _val(ws, r, c0 + 2 * j, d['OE_refl'], fmt=NUM2)
+                _val(ws, r, c0 + 2 * j + 1, d['EO_refl'], fmt=NUM2)
         _cell(ws, r, ncol, '')
         r += 1
     for c in range(2, ncol):
@@ -287,8 +278,8 @@ def build_workbook(res, meta):
             c0 = 2 + i * block
             for j, wl in enumerate(wls):
                 d = s['data'][f'{f}|{wl}']
-                _val(ws, r, c0 + 3 * j, d['OE'], out=d.get('OE_out'))
-                _val(ws, r, c0 + 3 * j + 1, d['EO'], out=d.get('EO_out'))
+                _val(ws, r, c0 + 3 * j, d['OE'])
+                _val(ws, r, c0 + 3 * j + 1, d['EO'])
                 _val(ws, r, c0 + 3 * j + 2, d['avg'], out=d['out'])
         for j, wl in enumerate(wls):
             _val(ws, r, cs + j, res['summary'][f'{f}|{wl}']['slope_mean'])
@@ -316,9 +307,7 @@ def build_workbook(res, meta):
             r += 1
         for row in rows:
             for k, v in enumerate(row):
-                cell = _cell(ws, r, 2 + k, v, fmt=NUM3 if isinstance(v, float) else None)
-                if k == 2:  # o valor fora do limiar
-                    cell.font = OUT_FONT
+                _cell(ws, r, 2 + k, v, fmt=NUM3 if isinstance(v, float) else None)
             _merge(ws, r, 2 + len(row), r, 10, '')
             r += 1
         r += 1
