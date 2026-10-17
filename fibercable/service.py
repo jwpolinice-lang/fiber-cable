@@ -56,6 +56,7 @@ def run(traces, cfg, th):
                    thresholds=th, point_names=cfg.get('names'), excluded=cfg.get('excluded'),
                    overrides=cfg.get('overrides'), manual_points=cfg.get('manual'),
                    auto_fill=cfg.get('auto_fill', True),
+                   hide_rare=not cfg.get('show_rare'),
                    detect_threshold=float(cfg.get('detect_threshold') or 0) if cfg.get('detect', True) else 0)
 
 

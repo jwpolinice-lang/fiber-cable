@@ -76,6 +76,10 @@ class Curve:
             l0 = max(l0, lower_idx + self.gap_after(False))
         if upper_idx is not None:
             r1 = min(r1, upper_idx - self.guard_before())
+            if r1 - r0 < 5 and not (markers and markers[0] and markers[3]):
+                # evento seguinte muito perto (ex.: épissure a 50 m do connecteur E): janela curta mais encostada
+                r0 = min(r0, ie + int(round(2 * self.pulse_pts() + 1)))
+                r1 = upper_idx - 2
         return (int(round(l0)), int(round(l1))), (int(round(r0)), int(round(r1)))
 
     def reflectance(self, ie, left, reflective_min_db=0.2):

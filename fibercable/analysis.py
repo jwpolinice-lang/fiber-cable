@@ -36,6 +36,7 @@ class Segment:
     events: list = field(default_factory=list)   # dicts com pos relativa a O
     trace: object = None
     curve: object = None
+    min_pos: float = -1.0     # abaixo disto a medida não chega (fibra parceira partida)
 
     def raw(self, pos):
         return self.o_raw + self.sign * pos
@@ -93,14 +94,21 @@ def detect_loop(t, include_end=False, kind=None):
 
 def _virtual_loop(t, evs):
     """Bouclage não marcado: procura o pico reflexivo perto do meio e calcula o evento na curva."""
-    from .sor import Event
-    c = _curve(t)
-    if not c or len(evs) < 2:
+    if len(evs) < 2:
         return None
     mid = (evs[0].distance_m + evs[-1].distance_m) / 2
-    span = 0.05 * (evs[-1].distance_m - evs[0].distance_m) + 20
-    peaks = [i * c.res for i in c.find_peaks(c.idx(mid - span), c.idx(mid + span))]
-    x = min(peaks, key=lambda p: abs(p - mid)) if peaks else mid
+    return _virtual_event(t, evs, mid, 0.05 * (evs[-1].distance_m - evs[0].distance_m) + 20)
+
+
+def _virtual_event(t, evs, target, span):
+    """Conector que o OTDR não marcou perto de `target`: pico reflexivo mais próximo, perda calculada na curva.
+    Acrescenta o evento a t.events e a evs e devolve o seu índice em evs."""
+    from .sor import Event
+    c = _curve(t)
+    if not c:
+        return None
+    peaks = [i * c.res for i in c.find_peaks(c.idx(target - span), c.idx(target + span))]
+    x = min(peaks, key=lambda p: abs(p - target)) if peaks else target
     lo = max([e.distance_m for e in evs if e.distance_m < x - 1], default=None)
     hi = min([e.distance_m for e in evs if e.distance_m > x + 1], default=None)
     r = c.event_at(x, lo, hi, reflective=bool(peaks))
@@ -112,6 +120,51 @@ def _virtual_loop(t, evs):
     evs.append(e)
     evs.sort(key=lambda ev: ev.distance_m)
     return evs.index(e)
+
+
+def _bobine_geometry(traces):
+    """Comprimentos típicos de uma bouclage com bobine, por λ: fibra (O -> A) e bobine (A -> B)."""
+    geo = {}
+    for t in traces:
+        k = detect_loop(t, kind='bobine')
+        if not k:
+            continue
+        evs = [e for e in t.events if not e.is_end]
+        geo.setdefault(_norm_wl(t.wavelength_nm), []).append(
+            (evs[k[0]].distance_m - evs[0].distance_m, evs[k[1]].distance_m - evs[k[0]].distance_m))
+    out = {}
+    for wl, v in geo.items():
+        lf = sorted(x[0] for x in v)[len(v) // 2]
+        lb = sorted(x[1] for x in v)[len(v) // 2]
+        out[wl] = (lf, lb)
+    return out
+
+
+def _infer_bobine(t, evs, lf, lb):
+    """Bouclage com bobine num ficheiro onde não é simétrico (conector não marcado, fibra partida...).
+    Usa a geometria típica do cabo a partir do connecteur O. Devolve (A, B, o2, partida_em_OE) com índices
+    em evs (B None se a medida acaba antes) e o2 = posição do O' (virtual se a fibra parceira estiver partida)."""
+    o = evs[0].distance_m
+    end = t.events[-1].distance_m
+    tol = 0.005 * lf + 15
+
+    def find(target):
+        cands = [i for i, e in enumerate(evs) if abs(e.distance_m - target) <= tol]
+        if cands:
+            return min(cands, key=lambda i: abs(evs[i].distance_m - target))
+        if end < target - tol:
+            return None
+        return _virtual_event(t, evs, target, tol)
+
+    a = find(o + lf)
+    if a is None:
+        return None, None, None, True  # a fibra medida acaba (partida) antes do connecteur E
+    b = find(evs[a].distance_m + lb)
+    if b is None:
+        return a, None, None, False
+    la = evs[a].distance_m - o
+    o2 = [i for i, e in enumerate(evs) if i > b and abs(e.distance_m - (evs[b].distance_m + la)) <= tol]
+    return a, b, (evs[o2[0]].distance_m if o2 else evs[b].distance_m + la), False
 
 
 def guess_direction(t, majority_origin):
@@ -162,6 +215,7 @@ def build_segments(traces, mode='auto', pairs=None):
     n_direct = sum(1 for k in kinds if k and k[0] == k[1])
     n_bob = sum(1 for k in kinds if k and k[0] != k[1])
     loop_kind = 'direct' if n_direct >= n_bob else 'bobine'
+    geo = _bobine_geometry(traces) if loop_kind == 'bobine' else {}
     if mode == 'auto':
         loops = [k is not None for k in kinds]
         mode = 'loop' if loops and sum(loops) * 2 >= len(loops) else 'direct'
@@ -182,6 +236,7 @@ def build_segments(traces, mode='auto', pairs=None):
             continue
         wl = _norm_wl(t.wavelength_nm)
         if mode == 'loop':
+            o2_virtual = None
             evs = [e for e in t.events if not e.is_end]
             loop_idx = detect_loop(t, kind=loop_kind)
             if loop_idx is None and detect_loop(t, include_end=True, kind=loop_kind) is not None:
@@ -202,6 +257,46 @@ def build_segments(traces, mode='auto', pairs=None):
                 evs = [e for e in t.events]
                 warnings.append(f"{t.filename}: o OTDR marcou o fim no connecteur O'" +
                                 (", perda calculada na curva." if end.computed else ", sem bobine depois dele a perda não é mensurável."))
+            fa = t.fiber_number
+            fb = pairs.get(fa)
+            g = geo.get(wl)
+            if g and loop_kind == 'bobine':
+                tol = 0.005 * g[0] + 15
+                ok = loop_idx is not None and abs(evs[loop_idx[0]].distance_m - evs[0].distance_m - g[0]) <= tol \
+                    and abs(evs[loop_idx[1]].distance_m - evs[loop_idx[0]].distance_m - g[1]) <= tol
+                if ok:
+                    # O' = evento a um comprimento de fibra depois de B (o OTDR pode marcar eventos na bobine de fim)
+                    a, b = loop_idx
+                    la_m = evs[a].distance_m - evs[0].distance_m
+                    o2c = [e for e in evs[b + 1:] if abs(e.distance_m - (evs[b].distance_m + la_m)) <= tol]
+                    if o2c and o2c[0] is not evs[-1]:
+                        evs = [e for e in evs if e.distance_m <= o2c[0].distance_m]
+                elif not evs:
+                    warnings.append(f'{t.filename}: só o fim de fibra foi marcado, ficheiro ignorado.')
+                    continue
+                else:
+                    a, b, o2_pos, broken = _infer_bobine(t, evs, *g)
+                    if broken or b is None:
+                        o = evs[0]
+                        last = a if a is not None else len(evs) - 1
+                        stop = evs[a].distance_m if a is not None else t.events[-1].distance_m
+                        seg_a = Segment(fa, wl, 'OE', t.filename, stop - o.distance_m, o.distance_m, 1,
+                                        trace=t, curve=_curve(t))
+                        for e in evs[:last + 1]:
+                            ev = _ev(e, e.distance_m - o.distance_m)
+                            ev['calc'] = e.computed
+                            seg_a.events.append(ev)
+                        segments.append(seg_a)
+                        warnings.append(f'{t.filename}: ' + ('a fibra acaba (partida?) a '
+                                        f'{t.events[-1].distance_m - o.distance_m:.0f} m de O, só o início é medido.'
+                                        if broken else 'a medida acaba antes da fibra parceira, só o sentido OE é usado.'))
+                        continue
+                    loop_idx = (a, b)
+                    if abs(evs[-1].distance_m - o2_pos) > 1:
+                        warnings.append(f'{t.filename}: a fibra parceira acaba (partida?) antes do connecteur O\', '
+                                        'posições EO calculadas com o comprimento das outras fibras.')
+                    evs = [e for e in evs if e.distance_m <= o2_pos + 1]
+                    o2_virtual = o2_pos
             if loop_idx is None:
                 li = _virtual_loop(t, evs)
                 loop_idx = None if li is None else (li, li)
@@ -209,13 +304,12 @@ def build_segments(traces, mode='auto', pairs=None):
                     warnings.append(f'{t.filename}: ponto de bouclage não encontrado, ficheiro ignorado.')
                     continue
                 warnings.append(f'{t.filename}: o OTDR não marcou o bouclage, evento calculado na curva.')
-            fa = t.fiber_number
-            fb = pairs.get(fa)
             if fb is None:
                 warnings.append(f'{t.filename}: fibra {fa} sem parceira de bouclage, só o sentido OE é usado.')
             la, lb = loop_idx
             shared = la == lb  # bouclage direto: um só evento para as duas fibras
-            o, loop_a, loop_b, o2 = evs[0], evs[la], evs[lb], evs[-1]
+            o, loop_a, loop_b = evs[0], evs[la], evs[lb]
+            o2_pos = o2_virtual if o2_virtual is not None else evs[-1].distance_m
             seg_a = Segment(fa, wl, 'OE', t.filename, loop_a.distance_m - o.distance_m, o.distance_m, 1,
                             trace=t, curve=_curve(t))
             for i, e in enumerate(evs[:la + 1]):
@@ -227,15 +321,17 @@ def build_segments(traces, mode='auto', pairs=None):
             segments.append(seg_a)
             if fb is None:
                 continue
-            seg_b = Segment(fb, wl, 'EO', t.filename, o2.distance_m - loop_b.distance_m, o2.distance_m, -1,
+            seg_b = Segment(fb, wl, 'EO', t.filename, o2_pos - loop_b.distance_m, o2_pos, -1,
                             trace=t, curve=_curve(t))
             for i in range(lb, len(evs)):
-                ev = _ev(evs[i], o2.distance_m - evs[i].distance_m)
+                ev = _ev(evs[i], o2_pos - evs[i].distance_m)
                 ev['calc'] = evs[i].computed
                 if shared and i == lb and first_of_pair[fb] != fb:
                     ev.update(loss=None, refl=None)
                 seg_b.events.append(ev)
             seg_b.events.reverse()
+            if o2_virtual is not None and t.events[-1].distance_m < o2_pos - 1:
+                seg_b.min_pos = o2_pos - t.events[-1].distance_m + 10
             segments.append(seg_b)
         else:
             origins = [x.origin for x in traces if x.origin]
@@ -364,7 +460,7 @@ def fill_missing(segments, centers, manual_flags, only=None):
             if k in s.by_point or (only is not None and k not in only):
                 continue
             pos = _estimate_pos(s, k, segments, center)
-            if pos < -1 or pos > s.length + 1:
+            if pos < max(-1, s.min_pos) or pos > s.length + 1:
                 continue
             raw = s.raw(pos)
             lo, hi = _neighbours(s, raw)
@@ -400,11 +496,13 @@ def section_slope(s, k, centers):
         if not between:
             ev = b if s.direction == 'OE' else a  # OTDR guarda a pente no evento do fim do troço
             first = a if s.direction == 'OE' else b  # e, no bloco privado, no evento do início
-            if ev['slope'] is not None:
+            if ev['slope']:  # 0 = o OTDR não calculou (troço curto): calcula-se na curva
                 return ev['slope'], first.get('slope_after_p')
     c = s.curve
     if not c:
         return None, None
+    if min(centers[k], centers[k + 1]) < s.min_pos or max(centers[k], centers[k + 1]) > s.length + 30:
+        return None, None  # troço fora do que a medida alcança
     ra = a['raw_pos'] if a else s.raw(centers[k])
     rb = b['raw_pos'] if b else s.raw(centers[k + 1])
     lo, hi = sorted([ra, rb])
@@ -465,7 +563,7 @@ def suggestions(segments, centers, tol, threshold):
 
 
 def analyse(traces, mode='auto', tol=20.0, thresholds=None, point_names=None, excluded=None, overrides=None,
-            manual_points=None, auto_fill=True, detect_threshold=0.05):
+            manual_points=None, auto_fill=True, detect_threshold=0.05, hide_rare=True):
     """Análise completa.
 
     point_names / overrides / excluded são indexados pela posição do ponto (m desde a origem), para
@@ -488,6 +586,12 @@ def analyse(traces, mode='auto', tol=20.0, thresholds=None, point_names=None, ex
     excl = [float(x) for x in (excluded or [])]
     # um ponto acrescentado à mão prevalece sobre um "Ignorar" anterior no mesmo sítio
     removed = [c for c in clusters if not c['manual'] and any(abs(c['center'] - x) <= 1.0 for x in excl)]
+    # com muitas medidas, um evento marcado só em 1% delas não é um ponto do cabo (épissures são comuns a
+    # todas as fibras): fica escondido como os ignorados, e "Repor todos" volta a mostrá-lo
+    rare = []
+    if hide_rare and len(segments) >= 50:
+        rare = [c for c in clusters if not c['manual'] and c not in removed and c['count'] < 0.01 * len(segments)]
+        removed += rare
     clusters = [c for c in clusters if c not in removed]
     centers = [c['center'] for c in clusters]
     assign(segments, centers, tol)
@@ -660,7 +764,7 @@ def analyse(traces, mode='auto', tol=20.0, thresholds=None, point_names=None, ex
 
     return {
         'mode': mode, 'tol': tol, 'fibers': fibers, 'wls': wls, 'points': points, 'sections': sections,
-        'removed_points': [{'center': c['center'], 'hits': c['count']} for c in removed],
+        'removed_points': [{'center': c['center'], 'hits': c['count'], 'rare': c in rare} for c in removed],
         'suggestions': sugg, 'summary': fiber_summary, 'out': out, 'thresholds': th,
         'info': info, 'warnings': warnings, 'traces': traces_out,
         'segments': [{'fiber': s.fiber, 'wl': s.wl, 'dir': s.direction, 'file': s.file,

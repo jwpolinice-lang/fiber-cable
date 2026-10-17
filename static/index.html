@@ -212,7 +212,7 @@ function config() {
     thresholds: { splice: $('th_splice').value, connector: $('th_connector').value, reflectance: $('th_refl').value,
                   diff_1550_1310: $('th_diff').value, slope: { 1310: $('th_s1310').value, 1550: $('th_s1550').value } },
     names: state.names, excluded: state.excluded, overrides: state.overrides, fiber_numbers: state.fiber_numbers,
-    manual: state.manual,
+    manual: state.manual, show_rare: !!state.show_rare,
     meta: { cable: $('m_cable').value, origin: $('m_origin').value, end: $('m_end').value, address: $('m_address').value,
             company: $('m_company').value, manager: $('m_manager').value, cable_type: $('m_cable_type').value,
             fiber_type: $('m_fiber_type').value, date: $('m_date').value }
@@ -222,7 +222,7 @@ function config() {
 async function upload(files) {
   const fd = new FormData();
   [...files].forEach(f => fd.append('files', f));
-  Object.assign(state, { names: {}, excluded: [], overrides: {}, fiber_numbers: {}, manual: [] });
+  Object.assign(state, { names: {}, excluded: [], overrides: {}, fiber_numbers: {}, manual: [], show_rare: false });
   fd.append('config', JSON.stringify(config()));
   $('files').textContent = 'A processar...';
   let d;
@@ -259,7 +259,7 @@ $('btnReset').onclick = () => {
   if (!confirm('Limpar os ficheiros e os resultados e recomeçar?')) return;
   R = null; job = null; view = null; geo = null; dragX = null;
   if (addMode) $('btnAdd').onclick();
-  Object.assign(state, { names: {}, excluded: [], overrides: {}, fiber_numbers: {}, manual: [] });
+  Object.assign(state, { names: {}, excluded: [], overrides: {}, fiber_numbers: {}, manual: [], show_rare: false });
   $('file').value = '';
   $('files').innerHTML = ''; $('points').textContent = 'Carregue os ficheiros .sor para começar.';
   ['sugg', 'warnings', 'tab', 'legend', 'saveBox', 'traceSel'].forEach(id => $(id).innerHTML = '');
@@ -332,7 +332,10 @@ function renderPoints() {
                        `<button class="sec small" data-x="${p.center}" title="Ignorar este ponto (evento fantasma)">Ignorar</button>`}</td></tr>`;
   });
   h += '</table>';
-  if (R.removed_points.length) h += `<p class="muted">${R.removed_points.length} ponto(s) ignorado(s). <button class="sec small" id="restore">Repor todos</button></p>`;
+  const nRare = R.removed_points.filter(p => p.rare).length;
+  if (R.removed_points.length) h += `<p class="muted">${R.removed_points.length} ponto(s) ignorado(s)` +
+    (nRare ? ` (${nRare} automaticamente, por só aparecerem em 1 ou 2 medidas)` : '') +
+    `. <button class="sec small" id="restore">Repor todos</button></p>`;
   $('points').innerHTML = h;
   $('points').querySelectorAll('.pn').forEach(i => i.onchange = () => { state.names[i.dataset.k] = i.value; reanalyse(); });
   $('points').querySelectorAll('[data-x]').forEach(b => b.onclick = () => { state.excluded.push(+b.dataset.x); reanalyse(); });
@@ -340,7 +343,7 @@ function renderPoints() {
     const c = +b.dataset.rm;
     state.manual = state.manual.filter(m => Math.abs(m - c) > (+R.tol || 20)); reanalyse();
   });
-  const rs = $('restore'); if (rs) rs.onclick = () => { state.excluded = []; reanalyse(); };
+  const rs = $('restore'); if (rs) rs.onclick = () => { state.excluded = []; state.show_rare = true; reanalyse(); };
 
   const sg = R.suggestions || [];
   $('sugg').innerHTML = sg.length ? `<h3 style="font-size:13px;margin:12px 0 4px">Possíveis eventos não marcados por nenhuma medida</h3>
