@@ -339,7 +339,7 @@ def build_segments(traces, mode='auto', pairs=None):
         if not k or not gap:
             return bool(k)
         if k[0] == k[1]:
-            return mode == 'loop_jar'  # jarretière curta: um só evento
+            return False
         evs = [e for e in t.events if not e.is_end]
         return gap[0] <= evs[k[1]].distance_m - evs[k[0]].distance_m <= gap[1]
     # primeiro a deteção pela simetria; o tipo escolhido só decide quando ela falha ou não bate com ele
