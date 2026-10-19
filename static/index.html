@@ -94,6 +94,7 @@
   <span class="muted sub" style="color:#c9d6e6">Pós-processamento OTDR (.sor)</span>
   <span id="engine"></span>
   <span class="sp"></span>
+  <select id="langSel" title="Língua / Langue" style="width:auto"><option value="pt">PT</option><option value="fr">FR</option></select>
   <button id="btnReset" class="sec" disabled>Repor</button>
   <button id="btnExport" class="sec" disabled>Exportar Excel</button>
   <span id="saveBox"></span>
@@ -191,6 +192,126 @@ const COLORS = ['#1f77b4','#d62728','#2ca02c','#9467bd','#ff7f0e','#17becf','#8c
 const touch = matchMedia('(pointer: coarse)').matches;
 if (matchMedia('(max-width: 700px)').matches) document.querySelectorAll('details.fold').forEach(d => d.open = false);
 if (touch) $('drop').innerHTML = 'Tocar para escolher os ficheiros .sor<br>(ou um .zip com eles)';
+// ---------- línguas: o texto da página é escrito em português e traduzido para francês à medida que aparece ----------
+const FR = {
+  'Pós-processamento OTDR (.sor)': 'Post-traitement OTDR (.sor)',
+  'Repor': 'Réinitialiser', 'Exportar Excel': 'Exporter Excel', 'A calcular...': 'Calcul en cours...',
+  'Ficheiros': 'Fichiers', 'Arrastar ficheiros .sor (ou um .zip) para aqui': 'Glisser les fichiers .sor (ou un .zip) ici',
+  'ou clicar para escolher': 'ou cliquer pour choisir', 'Tocar para escolher os ficheiros .sor': 'Toucher pour choisir les fichiers .sor',
+  '(ou um .zip com eles)': '(ou un .zip qui les contient)',
+  'Processamento': 'Traitement', 'Modo de medida': 'Mode de mesure', 'Automático': 'Automatique',
+  'Bouclage por jarretière (bobines 2 km início e fim)': 'Bouclage par jarretière (bobines 2 km amorce et fin)',
+  'Bouclage por bobine 2 km (bobines 2 km início e fim)': 'Bouclage par bobine 2 km (bobines 2 km amorce et fin)',
+  'Bouclage (tipo automático)': 'Bouclage (type automatique)', 'OE / EO separados': 'OE / EO séparés',
+  'Tolerância alinhamento (m)': 'Tolérance d\'alignement (m)',
+  'Calcular na curva os eventos que o OTDR não marcou': 'Calculer sur la courbe les événements non marqués par l\'OTDR',
+  'Procurar eventos que nenhuma medida marcou': 'Chercher les événements qu\'aucune mesure n\'a marqués',
+  'Limiar de deteção (dB)': 'Seuil de détection (dB)', 'Limiares': 'Seuils', 'Recalcular': 'Recalculer',
+  'Relatório': 'Rapport', 'Nome do cabo': 'Nom du câble', 'Origem': 'Origine', 'Extremidade': 'Extrémité',
+  'Morada (cabeçalho)': 'Adresse (en-tête)', 'Empresa (raccordement)': 'Entreprise (raccordement)',
+  'Chefe de projeto': 'Chef de projet', 'Tipo de cabo': 'Type de câble', 'Tipo de fibra': 'Type de fibre', 'Data': 'Date',
+  'Traços': 'Traces', '+ Adicionar evento': '+ Ajouter un événement', 'Repor zoom': 'Réinitialiser le zoom',
+  'Arrastar no gráfico para fazer zoom, duplo clique para repor.': 'Glisser sur le graphique pour zoomer, double clic pour revenir.',
+  'Arrastar no gráfico para fazer zoom, duplo clique para repor. 0 km = conector depois da bobine.':
+    'Glisser sur le graphique pour zoomer, double clic pour revenir. 0 km = connecteur après la bobine.',
+  'Clique na curva no sítio do evento (escolha primeiro um traço).': 'Cliquer sur la courbe à l\'endroit de l\'événement (choisir d\'abord une trace).',
+  'Pontos alinhados': 'Points alignés', 'Carregue os ficheiros .sor para começar.': 'Chargez les fichiers .sor pour commencer.',
+  'Medidas': 'Mesures', 'Hors normes': 'Hors normes',
+  'média fora do limiar': 'moyenne hors seuil', 'calculado na curva (OTDR não marcou)': 'calculé sur la courbe (non marqué par l\'OTDR)',
+  'sem valor': 'sans valeur', 'corrigido à mão': 'corrigé à la main',
+  'sublinhado = perda do OTDR recalculada por causa de um evento acrescentado ao lado':
+    'souligné = perte OTDR recalculée à cause d\'un événement ajouté à côté',
+  'A processar...': 'Traitement...', 'Modo detetado:': 'Mode détecté :', 'bouclage': 'bouclage',
+  'Ficheiro': 'Fichier', 'Fibra': 'Fibre', '#': '#', 'Nome do ponto': 'Nom du point', 'Tipo': 'Type',
+  'Dist. cum. (m)': 'Dist. cum. (m)', 'Troço (m)': 'Tronçon (m)', 'Marcado pelo OTDR': 'Marqué par l\'OTDR',
+  'Calculado': 'Calculé', 'manual': 'manuel', 'Remover': 'Supprimer', 'Ignorar': 'Ignorer',
+  'Ignorar este ponto (evento fantasma)': 'Ignorer ce point (événement fantôme)', 'Repor todos': 'Tout rétablir',
+  'Possíveis eventos não marcados por nenhuma medida': 'Événements possibles non marqués par aucune mesure',
+  'Posição (m desde a origem)': 'Position (m depuis l\'origine)', 'Visto em': 'Vu dans', 'Adicionar': 'Ajouter',
+  'Média ép.': 'Moy. ép.', 'Ponto': 'Point', 'Média (dB)': 'Moyenne (dB)', 'Média (dB/km)': 'Moyenne (dB/km)',
+  'Valor (dB)': 'Valeur (dB)', 'Sem valores.': 'Aucune valeur.', 'Sentido': 'Sens', 'Comprimento (m)': 'Longueur (m)',
+  'Eventos OTDR': 'Événements OTDR', 'Calculados na curva': 'Calculés sur la courbe', 'Sem valor': 'Sans valeur',
+  'Todos os traços': 'Toutes les traces', 'evento calculado pela app': 'événement calculé par l\'application',
+  'Calculado na curva (LSA): o OTDR não marcou este evento': 'Calculé sur la courbe (LSA) : l\'OTDR n\'a pas marqué cet événement',
+  'Guardar': 'Enregistrer', 'Partilhar Excel': 'Partager l\'Excel', 'Erro na exportação': 'Erreur lors de l\'export',
+  'Limpar os ficheiros e os resultados e recomeçar?': 'Effacer les fichiers et les résultats et recommencer ?',
+  'Escolha primeiro um traço na lista para adicionar o evento.': 'Choisissez d\'abord une trace dans la liste pour ajouter l\'événement.',
+  'Esse ponto está fora da fibra medida (bobine amorce ou fim).': 'Ce point est hors de la fibre mesurée (bobine amorce ou de fin).',
+  'A preparar o motor de cálculo...': 'Préparation du moteur de calcul...', 'A recalcular...': 'Recalcul...',
+  'A gerar o Excel...': 'Génération de l\'Excel...', 'Nenhuma medida utilizável.': 'Aucune mesure utilisable.',
+  'Nenhum ficheiro .sor válido.': 'Aucun fichier .sor valide.', 'Volte a carregar os ficheiros.': 'Rechargez les fichiers.',
+  ' · fora da fibra': ' · hors de la fibre',
+};
+// textos com números ou nomes de ficheiro (avisos da análise incluídos)
+const FR_RE = [
+  [/^(\d+) ficheiros \(mostrar e corrigir nº de fibra\)$/, '$1 fichiers (afficher et corriger le n° de fibre)'],
+  [/^(\d+) ponto\(s\) ignorado\(s\)/, '$1 point(s) ignoré(s)'],
+  [/\((\d+) automaticamente, porque a curva das outras fibras não mostra nada nesse sítio: /, '($1 automatiquement, car la courbe des autres fibres ne montre rien à cet endroit : '],
+  [/^(\d+) traços \(escolher um na lista para ver os valores\)$/, '$1 traces (en choisir une dans la liste pour voir les valeurs)'],
+  [/^(.*) \(fibra (\S+), (\d+) nm\)$/, '$1 (fibre $2, $3 nm)'],
+  [/^Recalculado \(OTDR dava (.*) dB\)$/, 'Recalculé (l\'OTDR donnait $1 dB)'],
+  [/^A calcular (\d+) ficheiro\(s\)\.\.\.$/, 'Calcul de $1 fichier(s)...'],
+  [/^Erro ao ler os ficheiros: /, 'Erreur de lecture des fichiers : '],
+  [/ · fibra (\S+) EO a (\S+) km de O$/, ' · fibre $1 EO à $2 km de O'],
+  [/ · fora da fibra$/, ' · hors de la fibre'],
+  [/: sem eventos gravados, (\d+) eventos detetados na curva\.$/, ' : aucun événement enregistré, $1 événements détectés sur la courbe.'],
+  [/: número de fibra desconhecido, indique-o na lista de ficheiros\.$/, ' : numéro de fibre inconnu, indiquez-le dans la liste des fichiers.'],
+  [/: nenhum evento encontrado, ficheiro ignorado\.$/, ' : aucun événement trouvé, fichier ignoré.'],
+  [/: o OTDR marcou o fim no connecteur O', perda calculada na curva\.$/, ' : l\'OTDR a marqué la fin sur le connecteur O\', perte calculée sur la courbe.'],
+  [/: o OTDR marcou o fim no connecteur O', sem bobine depois dele a perda não é mensurável\.$/, ' : l\'OTDR a marqué la fin sur le connecteur O\', sans bobine après lui la perte n\'est pas mesurable.'],
+  [/: só o fim de fibra foi marcado, ficheiro ignorado\.$/, ' : seule la fin de fibre est marquée, fichier ignoré.'],
+  [/: a fibra acaba \(partida\?\) a (\d+) m de O, só o início é medido\.$/, ' : la fibre s\'arrête (cassée ?) à $1 m de O, seul le début est mesuré.'],
+  [/: a medida acaba antes da fibra parceira, só o sentido OE é usado\.$/, ' : la mesure s\'arrête avant la fibre partenaire, seul le sens OE est utilisé.'],
+  [/: a fibra parceira acaba \(partida\?\) antes do connecteur O', posições EO calculadas com o comprimento das outras fibras\.$/, ' : la fibre partenaire s\'arrête (cassée ?) avant le connecteur O\', positions EO calculées avec la longueur des autres fibres.'],
+  [/: ponto de bouclage não encontrado, ficheiro ignorado\.$/, ' : point de bouclage introuvable, fichier ignoré.'],
+  [/: o OTDR não marcou o bouclage, evento calculado na curva\.$/, ' : l\'OTDR n\'a pas marqué le bouclage, événement calculé sur la courbe.'],
+  [/: fibra (\S+) sem parceira de bouclage, só o sentido OE é usado\.$/, ' : fibre $1 sans partenaire de bouclage, seul le sens OE est utilisé.'],
+  [/: o OTDR não marcou o connecteur O', calculado na curva\.$/, ' : l\'OTDR n\'a pas marqué le connecteur O\', calculé sur la courbe.'],
+  [/: zip inválido$/, ' : zip invalide'], [/: o zip não tem ficheiros \.sor$/, ' : le zip ne contient pas de fichiers .sor'],
+];
+let lang = 'pt';
+try { lang = localStorage.getItem('lang') === 'fr' ? 'fr' : 'pt'; } catch (e) {}
+function T(s) {
+  if (lang !== 'fr' || typeof s !== 'string') return s;
+  const k = s.trim();
+  if (FR[k] !== undefined) return s.replace(k, FR[k]);
+  let out = s;
+  for (const [re, rep] of FR_RE) out = out.replace(re, rep);
+  return out;
+}
+const ORIG = new WeakMap();  // texto original em português de cada nó traduzido
+function translateTree(root) {
+  if (lang !== 'fr') return;
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+  for (let n = root; n; n = w.nextNode()) {
+    if (n.nodeType === 3) {
+      if (n.nodeValue.trim()) { const v = T(n.nodeValue); if (v !== n.nodeValue) { ORIG.set(n, n.nodeValue); n.nodeValue = v; } }
+    } else if (n.title) { const v = T(n.title); if (v !== n.title) { n.dataset.titlePt = n.title; n.title = v; } }
+  }
+}
+function restoreTree(root) {
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+  for (let n = root; n; n = w.nextNode()) {
+    if (n.nodeType === 3) { if (ORIG.has(n)) { n.nodeValue = ORIG.get(n); ORIG.delete(n); } }
+    else if (n.dataset && n.dataset.titlePt) { n.title = n.dataset.titlePt; delete n.dataset.titlePt; }
+  }
+}
+new MutationObserver(ms => ms.forEach(m => {
+  if (m.type === 'characterData') { if (!ORIG.has(m.target)) translateTree(m.target); }
+  else m.addedNodes.forEach(translateTree);
+})).observe(document.body, { childList: true, subtree: true, characterData: true });
+function setLang(l) {
+  lang = l;
+  try { localStorage.setItem('lang', l); } catch (e) {}
+  document.documentElement.lang = l;
+  if (l === 'fr') translateTree(document.body); else restoreTree(document.body);
+  if (typeof R !== 'undefined' && R) show(R);
+}
+document.documentElement.lang = lang;
+$('langSel').value = lang;
+$('langSel').onchange = e => setLang(e.target.value);
+translateTree(document.body);
+
 const fmt = (v, d=3) => v === null || v === undefined ? '' : Number(v).toFixed(d);
 
 fetch('/api/defaults').then(r => r.json()).then(d => {
@@ -256,7 +377,7 @@ async function reanalyse() {
 
 // limpa ficheiros, resultados e correções para recomeçar (os limiares ficam)
 $('btnReset').onclick = () => {
-  if (!confirm('Limpar os ficheiros e os resultados e recomeçar?')) return;
+  if (!confirm(T('Limpar os ficheiros e os resultados e recomeçar?'))) return;
   R = null; job = null; view = null; geo = null; dragX = null;
   if (addMode) $('btnAdd').onclick();
   Object.assign(state, { names: {}, excluded: [], overrides: {}, fiber_numbers: {}, manual: [], show_rare: false });
@@ -273,7 +394,7 @@ $('btnApply').onclick = reanalyse;
 
 $('btnExport').onclick = async () => {
   const r = await busy(() => fetch('/api/export/' + job, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config()) }));
-  if (!r.ok) { alert('Erro na exportação'); return; }
+  if (!r.ok) { alert(T('Erro na exportação')); return; }
   const blob = await busy(() => r.blob());
   const name = 'Dossier_' + ($('m_cable').value || 'cable') + '.xlsx';
   const url = URL.createObjectURL(blob);
@@ -543,6 +664,7 @@ function overlay(px) {
   }
   g.strokeStyle = addMode ? '#15803d' : '#1f4e79'; g.lineWidth = 1; g.setLineDash([4, 3]);
   g.beginPath(); g.moveTo(px, T); g.lineTo(px, H - B); g.stroke(); g.setLineDash([]);
+  txt = T(txt);
   g.font = 'bold 12px system-ui';
   const w = g.measureText(txt).width + 10, bx = Math.min(Math.max(px - w / 2, L), W - Rr - w);
   g.fillStyle = addMode ? '#15803d' : '#1f4e79'; g.fillRect(bx, T, w, 18);
@@ -550,10 +672,10 @@ function overlay(px) {
 }
 
 function clickAdd(px) {
-  if (!geo.trace) { alert('Escolha primeiro um traço na lista para adicionar o evento.'); return; }
+  if (!geo.trace) { alert(T('Escolha primeiro um traço na lista para adicionar o evento.')); return; }
   const raw = inv(px) + geo.off;
   const seg = R.segments.find(s => s.file === geo.trace.file && raw >= s.lo - 5 && raw <= s.hi + 5);
-  if (!seg) { alert('Esse ponto está fora da fibra medida (bobine amorce ou fim).'); return; }
+  if (!seg) { alert(T('Esse ponto está fora da fibra medida (bobine amorce ou fim).')); return; }
   addManual((raw - seg.o_raw) * seg.sign);
 }
 
