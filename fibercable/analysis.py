@@ -296,13 +296,45 @@ def build_segments(traces, mode='auto', pairs=None):
     fibers = sorted({t.fiber_number for t in traces if t.fiber_number is not None})
     # tipo de bouclage decidido pela maioria dos ficheiros: num ficheiro onde falta o evento de
     # bouclage, duas épissures simétricas não podem passar por uma bobine
-    # tipo de bouclage escolhido pelo utilizador: jarretière (A e B colados ou um só evento) ou bobine
-    # de 2 km entre A e B; as bobines de início e de fim ficam fora da fibra nos dois casos
-    gap = None
-    if mode == 'loop_jar':
-        gap = (0.5, 300.0)
-    elif mode == 'loop_bob':
-        gap = (1000.0, 3500.0)
+    # tipo de bouclage escolhido pelo utilizador, com bobines de início e de fim parecidas: jarretière de
+    # ~10 cm (A e B são um só evento, a meio da curva toda) ou bobine de 2 km entre A e B
+    forced = mode in ('loop_jar', 'loop_bob')
+    jar = mode == 'loop_jar'
+    gap = (1000.0, 3500.0) if mode == 'loop_bob' else None
+
+    jar_centre = {}
+
+    def jar_loop(t):
+        # jarretière de ~10 cm: A e B são um só evento, no centro de simetria da curva (perto de fim/2).
+        # O centro vem dos pares de eventos espelhados (caixas atravessadas na ida e na volta), assim
+        # as caixas logo antes e depois da jarretière não passam por ela, mesmo que o OTDR não a marque.
+        evs = [e for e in t.events if not e.is_end]
+        end = t.events[-1].distance_m if t.events else 0
+        w = 0.05 * end
+        xs = [e.distance_m for e in evs]
+        cands = {x for x in xs if abs(x - end / 2) <= w}
+        cands |= {(a + b) / 2 for i, a in enumerate(xs) for b in xs[i + 1:] if abs((a + b) / 2 - end / 2) <= w}
+
+        def score(c):
+            tol = 0.005 * c + 10
+            return sum(1 for x in xs if x < c - tol and any(abs(y - (2 * c - x)) <= tol for y in xs))
+        best = max(sorted(cands, key=lambda c: abs(c - end / 2)), key=score, default=None)
+        if best is not None and score(best) >= 2:
+            tol = 0.005 * best + 10
+            near = [i for i in range(1, len(evs)) if abs(xs[i] - best) <= min(tol, 30)]
+            if near:
+                i = min(near, key=lambda i: abs(xs[i] - best))
+                return i, i
+            jar_centre[id(t)] = best
+            return None  # o OTDR não marcou a jarretière: evento calculado na curva no centro de simetria
+        k = detect_loop(t, kind='direct')
+        if k and abs(xs[k[0]] - end / 2) <= w:
+            return k
+        near = [i for i in range(1, len(evs)) if abs(xs[i] - end / 2) <= w]
+        if near:
+            i = min(near, key=lambda i: abs(xs[i] - end / 2))
+            return i, i
+        return k
     def fits(k, t):
         if not k or not gap:
             return bool(k)
@@ -314,14 +346,17 @@ def build_segments(traces, mode='auto', pairs=None):
     # (numa jarretière, as duas caixas logo antes e depois dela não podem passar por A e B)
     kinds = []
     for t in traces:
+        if jar:
+            kinds.append(jar_loop(t))
+            continue
         k = detect_loop(t)
         if gap and not fits(k, t):
-            k = detect_loop(t, kind='bobine', gap=gap) or (detect_loop(t, kind='direct') if mode == 'loop_jar' else None)
+            k = detect_loop(t, kind='bobine', gap=gap)
         kinds.append(k)
     kind_of = {id(t): k for t, k in zip(traces, kinds)}
     n_direct = sum(1 for k in kinds if k and k[0] == k[1])
     n_bob = sum(1 for k in kinds if k and k[0] != k[1])
-    loop_kind = 'bobine' if mode == 'loop_bob' or n_bob > n_direct else 'direct'
+    loop_kind = 'bobine' if mode == 'loop_bob' or (n_bob > n_direct and not jar) else 'direct'
     geo = _bobine_geometry(traces, gap) if loop_kind == 'bobine' else {}
     if mode in ('loop_jar', 'loop_bob'):
         mode = 'loop'
@@ -347,8 +382,9 @@ def build_segments(traces, mode='auto', pairs=None):
         if mode == 'loop':
             o2_virtual = None
             evs = [e for e in t.events if not e.is_end]
-            loop_idx = kind_of[id(t)] if gap else detect_loop(t, kind=loop_kind)
-            if loop_idx is None and detect_loop(t, include_end=True, kind=loop_kind, gap=gap) is not None:
+            loop_idx = kind_of[id(t)] if forced else detect_loop(t, kind=loop_kind)
+            if loop_idx is None and id(t) not in jar_centre and \
+                    detect_loop(t, include_end=True, kind=loop_kind, gap=gap) is not None:
                 # o OTDR parou no connecteur O' (fim de fibra marcado nele): usa-o e calcula a perda na curva
                 loop_idx = detect_loop(t, include_end=True, kind=loop_kind, gap=gap)
                 end = t.events[-1]
@@ -407,7 +443,9 @@ def build_segments(traces, mode='auto', pairs=None):
                     evs = [e for e in evs if e.distance_m <= o2_pos + 1]
                     o2_virtual = o2_pos
             if loop_idx is None:
-                li = _virtual_loop(t, evs)
+                end = t.events[-1].distance_m
+                li = (_virtual_event(t, evs, jar_centre[id(t)], 30) if id(t) in jar_centre else
+                      _virtual_event(t, evs, end / 2, 0.05 * end)) if jar else _virtual_loop(t, evs)
                 loop_idx = None if li is None else (li, li)
                 if li is None:
                     warnings.append(f'{t.filename}: ponto de bouclage não encontrado, ficheiro ignorado.')
@@ -424,7 +462,7 @@ def build_segments(traces, mode='auto', pairs=None):
                 tol_o2 = 0.005 * (loop_a.distance_m - o.distance_m) + 15
                 o2c = [e for e in evs[lb + 1:] if abs(e.distance_m - want) <= tol_o2]
                 o2e = min(o2c, key=lambda e: abs(e.distance_m - want)) if o2c else None
-                if o2e is None and gap and want < t.events[-1].distance_m - tol_o2:
+                if o2e is None and forced and want < t.events[-1].distance_m - tol_o2:
                     # tipo de bouclage dado: há bobine de fim, por isso O' existe mesmo sem o OTDR o marcar
                     i2 = _virtual_event(t, evs, want, tol_o2)
                     o2e = evs[i2] if i2 is not None else None
