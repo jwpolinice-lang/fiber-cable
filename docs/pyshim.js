@@ -1,7 +1,24 @@
 // Versão para telemóvel: as chamadas /api/... da página vão para o worker (Pyodide) em vez de um servidor.
 (function () {
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    // versão nova no site: a app instalada descarrega-a sozinha e passa a usá-la sem reinstalar
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+    }).catch(() => {});
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController) return;
+      const reset = document.getElementById('btnReset');
+      if (!reset || reset.disabled) { location.reload(); return; }  // nada carregado: atualiza já
+      // com ficheiros carregados não se perde o trabalho: um botão deixa atualizar quando der jeito
+      if (document.getElementById('updBar')) return;
+      const bar = document.createElement('div');
+      bar.id = 'updBar';
+      bar.style.cssText = 'position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:30;background:#1d2733;color:#fff;padding:8px 14px;border-radius:20px;font-size:14px;display:flex;gap:10px;align-items:center';
+      bar.innerHTML = '<span>Nova versão da app disponível.</span><button class="small">Atualizar</button>';
+      bar.querySelector('button').onclick = () => location.reload();
+      document.body.appendChild(bar);
+    });
   }
   const worker = new Worker('worker.js');
   const pending = {};
