@@ -67,7 +67,7 @@ def _ev(e, pos):
             'computed': bool(getattr(e, 'computed', False))}
 
 
-def detect_loop(t, include_end=False, kind=None):
+def detect_loop(t, include_end=False, kind=None, gap=None):
     """Índices (A, B) do bouclage, ou None se a medida não parecer em bouclage.
 
     A == B: bouclage direto (um só evento a meio). A < B: bouclage com bobine; A é o connecteur E
@@ -75,6 +75,7 @@ def detect_loop(t, include_end=False, kind=None):
     O bouclage é o centro de simetria: O e as caixas de épissura atravessadas à ida aparecem em espelho
     à volta. Entre os candidatos perto do meio fica o que tem mais eventos em espelho, para um evento
     falso perto do meio (ou na bobine de fim) não passar por bouclage.
+    gap: (mín, máx) em m entre A e B, quando o tipo de bouclage é conhecido (jarretière ou bobine).
     """
     evs = [e for e in t.events if include_end or not e.is_end]
     if len(evs) < 3:
@@ -104,6 +105,8 @@ def detect_loop(t, include_end=False, kind=None):
     elif kind != 'direct':
         sym_tol = 0.005 * span + 10
         for a in range(1, len(evs) - 2):
+            if gap and not gap[0] <= xs[a + 1] - xs[a] <= gap[1]:
+                continue
             if xs[a] < mid < xs[a + 1] and abs((xs[a] + xs[a + 1]) / 2 - mid) < sym_tol:
                 base = (a, a + 1)
                 break
@@ -115,7 +118,8 @@ def detect_loop(t, include_end=False, kind=None):
             m = mirrors(xs[i], {i})
             if m is not None:
                 cands.append((m, (i, i) == base, (i, i)))
-        if kind != 'direct' and i < len(evs) - 2 and abs((xs[i] + xs[i + 1]) / 2 - mid) < 0.4 * span:
+        if kind != 'direct' and i < len(evs) - 2 and abs((xs[i] + xs[i + 1]) / 2 - mid) < 0.4 * span and \
+                (not gap or gap[0] <= xs[i + 1] - xs[i] <= gap[1]):
             m = mirrors((xs[i] + xs[i + 1]) / 2, {i, i + 1})
             if m is not None:
                 cands.append((m, (i, i + 1) == base, (i, i + 1)))
@@ -123,6 +127,23 @@ def detect_loop(t, include_end=False, kind=None):
         best = max(cands)
         if base is None or best[0] > max([c[0] for c in cands if c[2] == base], default=-1):
             return best[2]
+    if base is None and gap:
+        # tipo de bouclage dado pelo utilizador: o par (A, B) com a distância certa cujo O' = B + (A - O)
+        # deixa uma bobine de fim parecida com a de início
+        end = t.events[-1].distance_m
+        pairs = []
+        for a in range(1, len(evs) - 1):
+            if kind == 'direct' or not gap[0] <= xs[a + 1] - xs[a] <= gap[1]:
+                continue
+            o2 = xs[a + 1] + xs[a] - first
+            tol_o2 = 0.005 * (xs[a] - first) + 15
+            if o2 > end + tol_o2:
+                continue
+            if not include_end and abs(end - o2) <= tol_o2:
+                return None  # o OTDR parou no O' (sem bobine de fim): trata-se como fim marcado no O'
+            pairs.append((abs((end - o2) - first), (a, a + 1)))
+        if pairs:
+            return min(pairs)[1]
     return base
 
 
@@ -156,11 +177,11 @@ def _virtual_event(t, evs, target, span):
     return evs.index(e)
 
 
-def _bobine_geometry(traces):
+def _bobine_geometry(traces, gap=None):
     """Comprimentos típicos de uma bouclage com bobine, por λ: fibra (O -> A) e bobine (A -> B)."""
     geo = {}
     for t in traces:
-        k = detect_loop(t, kind='bobine')
+        k = detect_loop(t, kind='bobine', gap=gap)
         if not k:
             continue
         evs = [e for e in t.events if not e.is_end]
@@ -275,11 +296,23 @@ def build_segments(traces, mode='auto', pairs=None):
     fibers = sorted({t.fiber_number for t in traces if t.fiber_number is not None})
     # tipo de bouclage decidido pela maioria dos ficheiros: num ficheiro onde falta o evento de
     # bouclage, duas épissures simétricas não podem passar por uma bobine
-    kinds = [detect_loop(t) for t in traces]
+    # tipo de bouclage escolhido pelo utilizador: jarretière (A e B colados ou um só evento) ou bobine
+    # de 2 km entre A e B; as bobines de início e de fim ficam fora da fibra nos dois casos
+    gap = None
+    if mode == 'loop_jar':
+        gap = (0.5, 300.0)
+    elif mode == 'loop_bob':
+        gap = (1000.0, 3500.0)
+    if mode == 'loop_jar':  # os dois conectores da jarretière; um só evento se ela for curta demais
+        kinds = [detect_loop(t, kind='bobine', gap=gap) or detect_loop(t, kind='direct') for t in traces]
+    else:
+        kinds = [detect_loop(t, kind='bobine' if mode == 'loop_bob' else None, gap=gap) for t in traces]
     n_direct = sum(1 for k in kinds if k and k[0] == k[1])
     n_bob = sum(1 for k in kinds if k and k[0] != k[1])
-    loop_kind = 'direct' if n_direct >= n_bob else 'bobine'
-    geo = _bobine_geometry(traces) if loop_kind == 'bobine' else {}
+    loop_kind = 'bobine' if mode == 'loop_bob' or n_bob > n_direct else 'direct'
+    geo = _bobine_geometry(traces, gap) if loop_kind == 'bobine' else {}
+    if mode in ('loop_jar', 'loop_bob'):
+        mode = 'loop'
     if mode == 'auto':
         loops = [k is not None for k in kinds]
         mode = 'loop' if loops and sum(loops) * 2 >= len(loops) and _mirror_score(traces, kinds) >= 0.3 else 'direct'
@@ -302,10 +335,10 @@ def build_segments(traces, mode='auto', pairs=None):
         if mode == 'loop':
             o2_virtual = None
             evs = [e for e in t.events if not e.is_end]
-            loop_idx = detect_loop(t, kind=loop_kind)
-            if loop_idx is None and detect_loop(t, include_end=True, kind=loop_kind) is not None:
+            loop_idx = detect_loop(t, kind=loop_kind, gap=gap)
+            if loop_idx is None and detect_loop(t, include_end=True, kind=loop_kind, gap=gap) is not None:
                 # o OTDR parou no connecteur O' (fim de fibra marcado nele): usa-o e calcula a perda na curva
-                loop_idx = detect_loop(t, include_end=True, kind=loop_kind)
+                loop_idx = detect_loop(t, include_end=True, kind=loop_kind, gap=gap)
                 end = t.events[-1]
                 c = _curve(t)
                 end.loss_db = 0.0
@@ -378,8 +411,14 @@ def build_segments(traces, mode='auto', pairs=None):
                 want = loop_b.distance_m + (loop_a.distance_m - o.distance_m)
                 tol_o2 = 0.005 * (loop_a.distance_m - o.distance_m) + 15
                 o2c = [e for e in evs[lb + 1:] if abs(e.distance_m - want) <= tol_o2]
-                if o2c:
-                    o2e = min(o2c, key=lambda e: abs(e.distance_m - want))
+                o2e = min(o2c, key=lambda e: abs(e.distance_m - want)) if o2c else None
+                if o2e is None and gap and want < t.events[-1].distance_m - tol_o2:
+                    # tipo de bouclage dado: há bobine de fim, por isso O' existe mesmo sem o OTDR o marcar
+                    i2 = _virtual_event(t, evs, want, tol_o2)
+                    o2e = evs[i2] if i2 is not None else None
+                    if o2e is not None:
+                        warnings.append(f"{t.filename}: o OTDR não marcou o connecteur O', calculado na curva.")
+                if o2e is not None:
                     evs = [e for e in evs if e.distance_m <= o2e.distance_m]
             o2_pos = o2_virtual if o2_virtual is not None else evs[-1].distance_m
             seg_a = Segment(fa, wl, 'OE', t.filename, loop_a.distance_m - o.distance_m, o.distance_m, 1,
