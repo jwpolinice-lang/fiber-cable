@@ -303,10 +303,22 @@ def build_segments(traces, mode='auto', pairs=None):
         gap = (0.5, 300.0)
     elif mode == 'loop_bob':
         gap = (1000.0, 3500.0)
-    if mode == 'loop_jar':  # os dois conectores da jarretière; um só evento se ela for curta demais
-        kinds = [detect_loop(t, kind='bobine', gap=gap) or detect_loop(t, kind='direct') for t in traces]
-    else:
-        kinds = [detect_loop(t, kind='bobine' if mode == 'loop_bob' else None, gap=gap) for t in traces]
+    def fits(k, t):
+        if not k or not gap:
+            return bool(k)
+        if k[0] == k[1]:
+            return mode == 'loop_jar'  # jarretière curta: um só evento
+        evs = [e for e in t.events if not e.is_end]
+        return gap[0] <= evs[k[1]].distance_m - evs[k[0]].distance_m <= gap[1]
+    # primeiro a deteção pela simetria; o tipo escolhido só decide quando ela falha ou não bate com ele
+    # (numa jarretière, as duas caixas logo antes e depois dela não podem passar por A e B)
+    kinds = []
+    for t in traces:
+        k = detect_loop(t)
+        if gap and not fits(k, t):
+            k = detect_loop(t, kind='bobine', gap=gap) or (detect_loop(t, kind='direct') if mode == 'loop_jar' else None)
+        kinds.append(k)
+    kind_of = {id(t): k for t, k in zip(traces, kinds)}
     n_direct = sum(1 for k in kinds if k and k[0] == k[1])
     n_bob = sum(1 for k in kinds if k and k[0] != k[1])
     loop_kind = 'bobine' if mode == 'loop_bob' or n_bob > n_direct else 'direct'
@@ -335,7 +347,7 @@ def build_segments(traces, mode='auto', pairs=None):
         if mode == 'loop':
             o2_virtual = None
             evs = [e for e in t.events if not e.is_end]
-            loop_idx = detect_loop(t, kind=loop_kind, gap=gap)
+            loop_idx = kind_of[id(t)] if gap else detect_loop(t, kind=loop_kind)
             if loop_idx is None and detect_loop(t, include_end=True, kind=loop_kind, gap=gap) is not None:
                 # o OTDR parou no connecteur O' (fim de fibra marcado nele): usa-o e calcula a perda na curva
                 loop_idx = detect_loop(t, include_end=True, kind=loop_kind, gap=gap)
