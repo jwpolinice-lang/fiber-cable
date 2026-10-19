@@ -63,7 +63,8 @@ def _ev(e, pos):
     return {'pos': pos, 'loss': e.loss_db, 'refl': refl,
             'slope': e.slope_db_km, 'reflective': e.reflective, 'raw_pos': e.distance_m,
             'markers': e.markers, 'num': e.number, 'calc': False, 'recalc': False,
-            'loss_p': e.loss_precise, 'slope_after_p': e.slope_after_precise}
+            'loss_p': e.loss_precise, 'slope_after_p': e.slope_after_precise,
+            'computed': bool(getattr(e, 'computed', False))}
 
 
 def detect_loop(t, include_end=False, kind=None):
@@ -71,25 +72,58 @@ def detect_loop(t, include_end=False, kind=None):
 
     A == B: bouclage direto (um só evento a meio). A < B: bouclage com bobine; A é o connecteur E
     da fibra medida e B o connecteur E da fibra parceira, simétricos em torno do meio.
+    O bouclage é o centro de simetria: O e as caixas de épissura atravessadas à ida aparecem em espelho
+    à volta. Entre os candidatos perto do meio fica o que tem mais eventos em espelho, para um evento
+    falso perto do meio (ou na bobine de fim) não passar por bouclage.
     """
     evs = [e for e in t.events if include_end or not e.is_end]
     if len(evs) < 3:
         return None
-    first, last = evs[0].distance_m, evs[-1].distance_m
+    xs = [e.distance_m for e in evs]
+    first, last = xs[0], xs[-1]
     mid = (first + last) / 2
-    tol = 0.03 * (last - first) + 10
-    idx = min(range(len(evs)), key=lambda i: abs(evs[i].distance_m - mid))
-    if kind != 'bobine' and 0 < idx < len(evs) - 1 and abs(evs[idx].distance_m - mid) < tol:
-        return idx, idx
-    if kind == 'direct':
-        return None
-    # bobine de bouclage: dois eventos seguidos simétricos em torno do meio
-    sym_tol = 0.005 * (last - first) + 10
-    for a in range(1, len(evs) - 2):
-        e1, e2 = evs[a].distance_m, evs[a + 1].distance_m
-        if e1 < mid < e2 and abs((e1 + e2) / 2 - mid) < sym_tol:
-            return a, a + 1
-    return None
+    span = last - first
+
+    def mirrors(c, skip):
+        """Eventos antes de c com espelho depois de c; None se O (ou a maioria) não tiver espelho."""
+        tol = 0.005 * (c - first) + 10
+        after = [x for i, x in enumerate(xs) if x > c + 1 and i not in skip]
+        if not any(abs(2 * c - first - y) <= tol for y in after):
+            return None
+        before = [x for i, x in enumerate(xs) if first + 1 < x < c - 1 and i not in skip]
+        m = sum(1 for x in before if any(abs(2 * c - x - y) <= tol for y in after))
+        # num bouclage verdadeiro a maioria das caixas tem espelho; um ou dois por acaso não chegam
+        return m if not before or m >= 0.4 * len(before) else None
+
+    # regra base: evento a meio (bouclage direto) ou dois eventos simétricos em torno do meio (bobine)
+    base = None
+    tol = 0.03 * span + 10
+    idx = min(range(len(evs)), key=lambda i: abs(xs[i] - mid))
+    if kind != 'bobine' and 0 < idx < len(evs) - 1 and abs(xs[idx] - mid) < tol:
+        base = (idx, idx)
+    elif kind != 'direct':
+        sym_tol = 0.005 * span + 10
+        for a in range(1, len(evs) - 2):
+            if xs[a] < mid < xs[a + 1] and abs((xs[a] + xs[a + 1]) / 2 - mid) < sym_tol:
+                base = (a, a + 1)
+                break
+    # com O' na lista, o centro de simetria com mais espelhos ganha (um evento falso perto do meio ou na
+    # bobine de fim desloca o meio, não o espelho)
+    cands = []
+    for i in range(1, len(evs) - 1):
+        if kind != 'bobine' and abs(xs[i] - mid) < max(tol, 0.4 * span):
+            m = mirrors(xs[i], {i})
+            if m is not None:
+                cands.append((m, (i, i) == base, (i, i)))
+        if kind != 'direct' and i < len(evs) - 2 and abs((xs[i] + xs[i + 1]) / 2 - mid) < 0.4 * span:
+            m = mirrors((xs[i] + xs[i + 1]) / 2, {i, i + 1})
+            if m is not None:
+                cands.append((m, (i, i + 1) == base, (i, i + 1)))
+    if cands:
+        best = max(cands)
+        if base is None or best[0] > max([c[0] for c in cands if c[2] == base], default=-1):
+            return best[2]
+    return base
 
 
 def _virtual_loop(t, evs):
@@ -203,6 +237,36 @@ def _ensure_events(t, warnings):
     warnings.append(f'{t.filename}: sem eventos gravados, {len(evs)} eventos detetados na curva.')
 
 
+def _mirror_score(traces, kinds):
+    """Num bouclage, as caixas de épissura que a fibra medida atravessa à ida voltam a aparecer, em espelho,
+    na fibra parceira à volta. Fração mediana dos eventos com espelho; perto de 0 quer dizer que o evento
+    a meio da medida é só mais uma caixa e a medida é direta."""
+    import bisect
+    pool = sorted(e.distance_m - t.events[0].distance_m for t in traces if t.events for e in t.events if not e.is_end)
+    if not pool:
+        return 0.0
+
+    def count(x, tol):
+        return bisect.bisect_right(pool, x + tol) - bisect.bisect_left(pool, x - tol)
+    scores = []
+    for t, k in zip(traces, kinds):
+        if not k:
+            continue
+        evs = [e for e in t.events if not e.is_end]
+        o = evs[0].distance_m
+        mid = (evs[k[0]].distance_m + evs[k[1]].distance_m) / 2 - o
+        inner = [e.distance_m - o for e in evs[1:k[0]] + evs[k[1] + 1:]]
+        tol = 0.002 * mid + 5
+        # só eventos que se repetem noutras medidas (caixas); um evento falso solto não tem espelho
+        inner = [x for x in inner if x > 30 and count(x, tol) >= 3]
+        if inner:
+            scores.append(sum(count(2 * mid - x, tol) > 0 for x in inner) / len(inner))
+    if not scores:
+        return 1.0  # sem eventos intermédios não há como desmentir o bouclage
+    scores.sort()
+    return scores[len(scores) // 2]
+
+
 def build_segments(traces, mode='auto', pairs=None):
     """Transforma os traços em segmentos por fibra/sentido."""
     warnings = []
@@ -218,7 +282,7 @@ def build_segments(traces, mode='auto', pairs=None):
     geo = _bobine_geometry(traces) if loop_kind == 'bobine' else {}
     if mode == 'auto':
         loops = [k is not None for k in kinds]
-        mode = 'loop' if loops and sum(loops) * 2 >= len(loops) else 'direct'
+        mode = 'loop' if loops and sum(loops) * 2 >= len(loops) and _mirror_score(traces, kinds) >= 0.3 else 'direct'
     if pairs is None:
         pairs = {}
         for a, b in zip(fibers[0::2], fibers[1::2]):
@@ -309,6 +373,14 @@ def build_segments(traces, mode='auto', pairs=None):
             la, lb = loop_idx
             shared = la == lb  # bouclage direto: um só evento para as duas fibras
             o, loop_a, loop_b = evs[0], evs[la], evs[lb]
+            if o2_virtual is None:
+                # O' é o espelho de O; eventos depois dele (bobine de fim, fantasmas) não são da fibra
+                want = loop_b.distance_m + (loop_a.distance_m - o.distance_m)
+                tol_o2 = 0.005 * (loop_a.distance_m - o.distance_m) + 15
+                o2c = [e for e in evs[lb + 1:] if abs(e.distance_m - want) <= tol_o2]
+                if o2c:
+                    o2e = min(o2c, key=lambda e: abs(e.distance_m - want))
+                    evs = [e for e in evs if e.distance_m <= o2e.distance_m]
             o2_pos = o2_virtual if o2_virtual is not None else evs[-1].distance_m
             seg_a = Segment(fa, wl, 'OE', t.filename, loop_a.distance_m - o.distance_m, o.distance_m, 1,
                             trace=t, curve=_curve(t))
@@ -352,21 +424,122 @@ def build_segments(traces, mode='auto', pairs=None):
 
 
 def cluster_points(segments, tol, manual=()):
-    """Agrupa as posições de todos os eventos (e dos pontos manuais) em pontos comuns."""
-    positions = sorted([(ev['pos'], False) for s in segments for ev in s.events] +
-                       [(float(m), True) for m in manual])
-    clusters = []
-    for p, is_manual in positions:
-        if clusters and p - clusters[-1][-1][0] <= tol:
-            clusters[-1].append((p, is_manual))
-        else:
-            clusters.append([(p, is_manual)])
+    """Agrupa as posições de todos os eventos (e dos pontos manuais) em pontos comuns.
+
+    Começa pelo sítio onde há mais eventos juntos e vai descendo, para que eventos soltos entre dois
+    pontos não os colem num só grupo comprido."""
+    items = sorted((ev['pos'], i) for i, s in enumerate(segments) for ev in s.events)
+    pos = [p for p, _ in items]
+    alive = [True] * len(pos)
     out = []
-    for c in clusters:
-        real = [p for p, m in c if not m]
-        out.append({'center': sum(real) / len(real) if real else c[0][0],
-                    'count': len(real), 'manual': any(m for _, m in c)})
-    return out
+    while True:
+        best, best_n, j, n = None, 0, 0, 0
+        for i in range(len(pos)):  # janela [pos[i], pos[i] + tol] com mais eventos ainda livres
+            if i and alive[i - 1]:
+                n -= 1
+            while j < len(pos) and pos[j] <= pos[i] + tol:
+                n += alive[j]
+                j += 1
+            if alive[i] and n > best_n:
+                best, best_n = i, n
+        if best is None:
+            break
+        win = sorted(pos[k] for k in range(best, len(pos)) if alive[k] and pos[k] <= pos[best] + tol)
+        mid = win[len(win) // 2]
+        members = [k for k in range(len(pos)) if alive[k] and abs(pos[k] - mid) <= tol]
+        for k in members:
+            alive[k] = False
+        vals = [pos[k] for k in members]
+        out.append({'center': sum(vals) / len(vals), 'count': len({items[k][1] for k in members}),
+                    'manual': False})
+    for m in manual:
+        m = float(m)
+        near = [c for c in out if abs(c['center'] - m) <= tol]
+        if near:
+            min(near, key=lambda c: abs(c['center'] - m))['manual'] = True
+        else:
+            out.append({'center': m, 'count': 0, 'manual': True})
+    return sorted(out, key=lambda c: c['center'])
+
+
+def confirm_points(segments, clusters, tol, max_pairs=64):
+    """Separa os pontos do cabo dos eventos falsos (ruído, fantasmas, curvaturas de uma só fibra).
+
+    Uma épissure ou conector está na mesma distância em todas as fibras do cabo. Por isso um ponto fica
+    se o OTDR o marcou em (quase) todas as medidas, ou se a curva mostra um degrau nesse sítio na grande
+    maioria das fibras. Um evento marcado só em algumas fibras e sem degrau nas outras não é um ponto do
+    cabo. Devolve a lista de clusters recusados."""
+    n_seg = len(segments)
+    cand = [i for i, c in enumerate(clusters) if not c['manual']]
+    if len(cand) <= 2 or n_seg < 2:
+        return []
+    lengths = sorted(s.length for s in segments)
+    length = lengths[len(lengths) // 2]
+    # conectores O e E: os pontos mais perto do início e do comprimento da fibra; nada fica para lá deles
+    first = min(cand, key=lambda k: abs(clusters[k]['center']))
+    last = min(cand, key=lambda k: abs(clusters[k]['center'] - length))
+    rejected = [clusters[k] for k in cand if clusters[k]['center'] < clusters[first]['center'] or
+                clusters[k]['center'] > clusters[last]['center']]
+    cand = [k for k in cand if clusters[first]['center'] <= clusters[k]['center'] <= clusters[last]['center']]
+    centers = [c['center'] for c in clusters]
+    assign(segments, centers, tol)
+    otdr = {k: sum(1 for s in segments if k in s.by_point and not s.by_point[k]['computed']) for k in cand}
+    # num lote pequeno, metade das medidas são uma ou duas fibras: só "todas" dispensa a prova na curva
+    sure = 0.5 * n_seg if n_seg >= 20 else n_seg
+    doubt = [k for k in cand if k not in (first, last) and otdr[k] < sure]
+    if n_seg >= 20:  # num lote grande, um evento visto numa só medida nem se avalia
+        rejected += [clusters[k] for k in doubt if clusters[k]['count'] <= 1]
+        doubt = [k for k in doubt if clusters[k]['count'] > 1]
+    by_fiber = {}
+    for s in segments:
+        by_fiber.setdefault(s.fiber, []).append(s)
+    # amostra de fibras/λ espalhada pelo lote (o cálculo na curva é o mais lento)
+    pairs = sorted({(s.fiber, s.wl) for s in segments})
+    if len(pairs) > max_pairs:
+        step = len(pairs) / max_pairs
+        pairs = [pairs[int(i * step)] for i in range(max_pairs)]
+    pairs = set(pairs)
+    sel = [s for s in segments if (s.fiber, s.wl) in pairs and s.curve]
+    est = {id(s): [_estimate_pos(s, k, by_fiber[s.fiber], centers[k]) for k in range(len(centers))] for s in sel}
+    accepted = set(cand) - set(doubt)
+    # dos mais vistos para os menos vistos. As janelas LSA acabam só nos pontos já aceites (e nunca nos
+    # eventos duvidosos), para o degrau de uma épissure vizinha não contar aqui e um evento falso ao lado
+    # não encurtar a medida
+    for k in sorted(doubt, key=lambda k: -clusters[k]['count']):
+        by_pair = {}
+        for s in sel:
+            pos = est[id(s)][k]
+            if pos < max(-1, s.min_pos) or pos > s.length + 1:
+                continue
+            raw = s.raw(pos)
+            near = [s.raw(est[id(s)][a]) for a in accepted]
+            near = [x for x in near if abs(x - raw) > 0.5]
+            lo = max([x for x in near if x < raw], default=None)
+            hi = min([x for x in near if x > raw], default=None)
+            loss = s.curve.event_at(raw, lo, hi)['loss']
+            ev = s.by_point.get(k)
+            if loss is None and ev and not ev['computed']:
+                loss = ev['loss']
+            if loss is not None:
+                by_pair.setdefault((s.fiber, s.wl), []).append(loss)
+        per = [sum(v) / len(v) for v in by_pair.values()]
+        if len(per) < 3:  # a curva não deixa medir: decide o OTDR
+            (accepted.add(k) if otdr[k] >= 0.5 * n_seg else rejected.append(clusters[k]))
+            continue
+        # com os dois sentidos, a média OE/EO de uma épissure é positiva (os gainers anulam-se); num só
+        # sentido um gainer também é uma épissure, por isso conta o tamanho do degrau e não o sinal
+        both = sum(len(v) > 1 for v in by_pair.values()) * 2 >= len(by_pair)
+        vals = sorted(per) if both else sorted(abs(v) for v in per)
+        median = vals[len(vals) // 2] if len(vals) % 2 else (vals[len(vals) // 2 - 1] + vals[len(vals) // 2]) / 2
+        share = sum(v >= (0 if both else 0.005) for v in vals) / len(vals)
+        clusters[k]['evidence'] = {'median': round(median, 4), 'share': round(share, 2), 'n': len(per)}
+        if median >= 0.01 and share >= 0.75:
+            accepted.add(k)
+        else:
+            rejected.append(clusters[k])
+    for s in segments:
+        s.by_point = {}
+    return rejected
 
 
 def assign(segments, centers, tol):
@@ -586,11 +759,11 @@ def analyse(traces, mode='auto', tol=20.0, thresholds=None, point_names=None, ex
     excl = [float(x) for x in (excluded or [])]
     # um ponto acrescentado à mão prevalece sobre um "Ignorar" anterior no mesmo sítio
     removed = [c for c in clusters if not c['manual'] and any(abs(c['center'] - x) <= 1.0 for x in excl)]
-    # com muitas medidas, um evento marcado só em 1% delas não é um ponto do cabo (épissures são comuns a
-    # todas as fibras): fica escondido como os ignorados, e "Repor todos" volta a mostrá-lo
+    # eventos que não são pontos do cabo ficam escondidos como os ignorados, e "Repor" volta a mostrá-los
     rare = []
-    if hide_rare and len(segments) >= 50:
-        rare = [c for c in clusters if not c['manual'] and c not in removed and c['count'] < 0.01 * len(segments)]
+    if hide_rare:
+        kept = [c for c in clusters if c not in removed]
+        rare = confirm_points(segments, kept, tol)
         removed += rare
     clusters = [c for c in clusters if c not in removed]
     centers = [c['center'] for c in clusters]
@@ -764,7 +937,8 @@ def analyse(traces, mode='auto', tol=20.0, thresholds=None, point_names=None, ex
 
     return {
         'mode': mode, 'tol': tol, 'fibers': fibers, 'wls': wls, 'points': points, 'sections': sections,
-        'removed_points': [{'center': c['center'], 'hits': c['count'], 'rare': c in rare} for c in removed],
+        'removed_points': [{'center': c['center'], 'hits': c['count'], 'rare': c in rare}
+                           for c in sorted(removed, key=lambda c: c['center'])],
         'suggestions': sugg, 'summary': fiber_summary, 'out': out, 'thresholds': th,
         'info': info, 'warnings': warnings, 'traces': traces_out,
         'segments': [{'fiber': s.fiber, 'wl': s.wl, 'dir': s.direction, 'file': s.file,

@@ -334,7 +334,9 @@ function renderPoints() {
   h += '</table>';
   const nRare = R.removed_points.filter(p => p.rare).length;
   if (R.removed_points.length) h += `<p class="muted">${R.removed_points.length} ponto(s) ignorado(s)` +
-    (nRare ? ` (${nRare} automaticamente, por só aparecerem em 1 ou 2 medidas)` : '') +
+    (nRare ? ` (${nRare} automaticamente, porque a curva das outras fibras não mostra nada nesse sítio: ` +
+      R.removed_points.filter(p => p.rare).slice(0, 12).map(p => fmt(p.center / 1000, 3) + ' km').join(', ') +
+      (nRare > 12 ? ', ...' : '') + ')' : '') +
     `. <button class="sec small" id="restore">Repor todos</button></p>`;
   $('points').innerHTML = h;
   $('points').querySelectorAll('.pn').forEach(i => i.onchange = () => { state.names[i.dataset.k] = i.value; reanalyse(); });
