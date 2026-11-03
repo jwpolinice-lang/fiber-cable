@@ -6,7 +6,8 @@ import zipfile
 from .analysis import analyse
 from .report import build_workbook
 from .sor import parse_sor
-from .sorwrite import curve_report, processed_sor
+from .dossier_txt import build_dossier_txt
+from .sorwrite import processed_sor
 
 
 def read_uploads(items):
@@ -78,9 +79,10 @@ def export(traces, cfg, th):
 
 
 def export_curves(traces, cfg, th):
-    """Devolve (bytes do zip com as curvas tratadas .sor e um relatório .txt por curva, nome do ficheiro)."""
+    """Devolve (bytes do zip com as curvas tratadas .sor e o Dossier.txt no formato do FiberCable, nome do zip)."""
     res = run(traces, cfg, th)
-    cable = (cfg.get('meta') or {}).get('cable') or res['info']['cable'] or 'cable'
+    meta = {k: v for k, v in (cfg.get('meta') or {}).items() if v}
+    cable = meta.get('cable') or res['info']['cable'] or 'cable'
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
         for t in traces:
@@ -88,5 +90,5 @@ def export_curves(traces, cfg, th):
                 continue
             stem = t.filename[:-4] if t.filename.lower().endswith('.sor') else t.filename
             z.writestr(f'{stem}.sor', processed_sor(t.raw, t, res))
-            z.writestr(f'{stem}.txt', curve_report(t, res).encode('utf-8-sig'))
+        z.writestr(f'Dossier_{cable}.txt', build_dossier_txt(res, traces, meta))
     return buf.getvalue(), f'Courbes_{cable}.zip'

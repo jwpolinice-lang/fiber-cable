@@ -1,5 +1,5 @@
 """Curvas tratadas: reescreve o .sor original com a tabela de eventos da análise (pontos do cabo,
-posições alinhadas, perdas recalculadas e eventos acrescentados), e o relatório .txt de cada curva."""
+posições alinhadas, perdas recalculadas e eventos acrescentados)."""
 import binascii
 import struct
 
@@ -135,35 +135,3 @@ def processed_sor(data, t, res):
         struct.pack_into('<H', out, len(out) - 2, crc)
     return bytes(out)
 
-
-def _f(v, fmt='%.3f', none='-'):
-    return none if v is None else (fmt % v).replace('.', ',')
-
-
-def curve_report(t, res):
-    """Relatório .txt da curva tratada."""
-    evs = curve_events(t, res)
-    segs = [s for s in res['segments'] if s['file'] == t.filename]
-    lines = [
-        f'Fichier          : {t.filename}',
-        f'Câble            : {t.cable_id}',
-        f'Fibre            : {t.fiber_id}',
-        f'Origine          : {t.origin}',
-        f'Extrémité        : {t.end}',
-        f'OTDR             : {t.otdr} {t.otdr_sn}  module {t.module} {t.module_sn}',
-        f'Longueur d\'onde  : {t.wavelength_nm:.0f} nm   Impulsion : {t.pulse_ns} ns   IOR : {t.ior:.5f}',
-        f'Mode de mesure   : {"bouclage" if res.get("mode") == "loop" else "directe"}',
-    ]
-    for s in segs:
-        key = f"{s['fiber']}|{s['wl']}"
-        b = (res['summary'].get(key) or {}).get('budget')
-        lines.append(f"Fibre {s['fiber']} sens {s['dir']} : longueur {_f(s['length'], '%.1f')} m, "
-                     f"bilan {_f(b)} dB")
-    lines += ['', f"{'N°':>3}  {'Distance (m)':>12}  {'Perte (dB)':>10}  {'Réfl. (dB)':>10}  "
-                  f"{'Pente (dB/km)':>13}  {'Fibre':>5}  {'Sens':>4}  Evénement"]
-    for i, e in enumerate(evs, 1):
-        tag = ' (calculé)' if e['calc'] else (' (recalculé)' if e['recalc'] else '')
-        tag += ' (modifié)' if e['edited'] else ''
-        lines.append(f"{i:>3}  {_f(e['pos'], '%.2f'):>12}  {_f(e['loss']):>10}  {_f(e['refl'], '%.2f'):>10}  "
-                     f"{_f(e['slope']):>13}  {e['fiber'] or '':>5}  {e['dir']:>4}  {e['name']}{tag}")
-    return '\r\n'.join(lines) + '\r\n'
