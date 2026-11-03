@@ -71,6 +71,16 @@ def export(job):
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
+
+@app.post('/api/curves/<job>')
+def curves(job):
+    if job not in JOBS:
+        return jsonify({'error': 'Sessão expirada, volte a carregar os ficheiros.'}), 404
+    cfg, th = _config()
+    data, name = service.export_curves(JOBS[job], cfg, th)
+    return send_file(io.BytesIO(data), as_attachment=True, download_name=name, mimetype='application/zip')
+
+
 if __name__ == '__main__':
     threading.Timer(1.0, lambda: webbrowser.open('http://127.0.0.1:5000')).start()
     app.run(host='127.0.0.1', port=5000, debug=False)

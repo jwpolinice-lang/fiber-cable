@@ -50,3 +50,11 @@ def export(cfg_json):
     cfg, th = service.parse_config(json.loads(cfg_json or '{}'))
     data, name = service.export(TRACES, cfg, th)
     return 200, data, name
+
+
+def curves(cfg_json):
+    if not TRACES:
+        return 404, None, None
+    cfg, th = service.parse_config(json.loads(cfg_json or '{}'))
+    data, name = service.export_curves(TRACES, cfg, th)
+    return 200, data, name

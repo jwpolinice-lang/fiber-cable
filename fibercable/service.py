@@ -6,6 +6,7 @@ import zipfile
 from .analysis import analyse
 from .report import build_workbook
 from .sor import parse_sor
+from .sorwrite import curve_report, processed_sor
 
 
 def read_uploads(items):
@@ -26,7 +27,9 @@ def read_uploads(items):
             traces += items_t; errors += errs
             continue
         try:
-            traces.append(parse_sor(data, filename=name))
+            t = parse_sor(data, filename=name)
+            t.raw = data  # para escrever a curva tratada
+            traces.append(t)
         except Exception as e:  # ficheiro corrompido ou formato não suportado
             errors.append(f'{name}: {e}')
     traces.sort(key=lambda t: (t.fiber_number or 0, t.wavelength_nm, t.filename))
@@ -72,3 +75,18 @@ def export(traces, cfg, th):
         meta['date'] = datetime.date.fromisoformat(meta['date'])
     name = f"Dossier_{meta.get('cable') or res['info']['cable'] or 'cable'}.xlsx"
     return build_workbook(res, meta), name
+
+
+def export_curves(traces, cfg, th):
+    """Devolve (bytes do zip com as curvas tratadas .sor e um relatório .txt por curva, nome do ficheiro)."""
+    res = run(traces, cfg, th)
+    cable = (cfg.get('meta') or {}).get('cable') or res['info']['cable'] or 'cable'
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+        for t in traces:
+            if not getattr(t, 'raw', None) or not any(s['file'] == t.filename for s in res['segments']):
+                continue
+            stem = t.filename[:-4] if t.filename.lower().endswith('.sor') else t.filename
+            z.writestr(f'{stem}.sor', processed_sor(t.raw, t, res))
+            z.writestr(f'{stem}.txt', curve_report(t, res).encode('utf-8-sig'))
+    return buf.getvalue(), f'Courbes_{cable}.zip'

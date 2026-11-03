@@ -97,6 +97,7 @@
   <select id="langSel" title="Língua / Langue" style="width:auto"><option value="pt">PT</option><option value="fr">FR</option></select>
   <button id="btnReset" class="sec" disabled>Repor</button>
   <button id="btnExport" class="sec" disabled>Exportar Excel</button>
+  <button id="btnCurves" class="sec" disabled>Exportar curvas</button>
   <span id="saveBox"></span>
 </header>
 <div id="busy" hidden>A calcular...</div>
@@ -233,7 +234,8 @@ const FR = {
   'Eventos OTDR': 'Événements OTDR', 'Calculados na curva': 'Calculés sur la courbe', 'Sem valor': 'Sans valeur',
   'Todos os traços': 'Toutes les traces', 'evento calculado pela app': 'événement calculé par l\'application',
   'Calculado na curva (LSA): o OTDR não marcou este evento': 'Calculé sur la courbe (LSA) : l\'OTDR n\'a pas marqué cet événement',
-  'Guardar': 'Enregistrer', 'Partilhar Excel': 'Partager l\'Excel', 'Erro na exportação': 'Erreur lors de l\'export',
+  'Guardar': 'Enregistrer', 'Partilhar Excel': 'Partager l\'Excel', 'Exportar curvas': 'Exporter les courbes',
+  'Partilhar curvas': 'Partager les courbes', 'A gerar as curvas...': 'Génération des courbes...', 'Erro na exportação': 'Erreur lors de l\'export',
   'Limpar os ficheiros e os resultados e recomeçar?': 'Effacer les fichiers et les résultats et recommencer ?',
   'Escolha primeiro um traço na lista para adicionar o evento.': 'Choisissez d\'abord une trace dans la liste pour ajouter l\'événement.',
   'Esse ponto está fora da fibra medida (bobine amorce ou fim).': 'Ce point est hors de la fibre mesurée (bobine amorce ou de fin).',
@@ -386,37 +388,39 @@ $('btnReset').onclick = () => {
   $('files').innerHTML = ''; $('points').textContent = 'Carregue os ficheiros .sor para começar.';
   ['sugg', 'warnings', 'tab', 'legend', 'saveBox', 'traceSel'].forEach(id => $(id).innerHTML = '');
   ['m_cable', 'm_origin', 'm_end', 'm_address', 'm_company', 'm_manager', 'm_cable_type', 'm_fiber_type', 'm_date'].forEach(id => $(id).value = '');
-  ['btnExport', 'btnApply', 'btnAdd', 'btnReset'].forEach(id => $(id).disabled = true);
+  ['btnExport', 'btnCurves', 'btnApply', 'btnAdd', 'btnReset'].forEach(id => $(id).disabled = true);
   ['chart', 'chartTop'].forEach(id => { const c = $(id); c.getContext('2d').clearRect(0, 0, c.width, c.height); });
   window.scrollTo(0, 0);
 };
 $('btnApply').onclick = reanalyse;
 ['mode', 'tol', 'auto_fill', 'detect', 'detect_threshold'].forEach(id => $(id).onchange = reanalyse);
 
-$('btnExport').onclick = async () => {
-  const r = await busy(() => fetch('/api/export/' + job, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config()) }));
+async function download(route, name, shareLabel) {
+  const r = await busy(() => fetch(route + job, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config()) }));
   if (!r.ok) { alert(T('Erro na exportação')); return; }
   const blob = await busy(() => r.blob());
-  const name = 'Dossier_' + ($('m_cable').value || 'cable') + '.xlsx';
   const url = URL.createObjectURL(blob);
   if (!touch) {
     const a = document.createElement('a'); a.href = url; a.download = name; a.click();
     return;
   }
-  // telemóvel: o Excel fica pronto e um toque guarda-o ou partilha-o (Dropbox, email...)
+  // telemóvel: o ficheiro fica pronto e um toque guarda-o ou partilha-o (Dropbox, email...)
   const file = new File([blob], name, { type: blob.type });
   const box = $('saveBox');
   box.innerHTML = `<a href="${url}" download="${esc(name)}">Guardar</a>`;
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    const b = document.createElement('button'); b.className = 'small'; b.textContent = 'Partilhar Excel';
+    const b = document.createElement('button'); b.className = 'small'; b.textContent = shareLabel;
     b.onclick = () => navigator.share({ files: [file], title: name }).catch(() => {});
     box.prepend(b);
   }
-};
+}
+$('btnExport').onclick = () => download('/api/export/', 'Dossier_' + ($('m_cable').value || 'cable') + '.xlsx', 'Partilhar Excel');
+// curvas tratadas: um .sor e um relatório .txt por ficheiro, num zip
+$('btnCurves').onclick = () => download('/api/curves/', 'Courbes_' + ($('m_cable').value || 'cable') + '.zip', 'Partilhar curvas');
 
 function show(d) {
   R = d;
-  ['btnExport', 'btnApply', 'btnAdd', 'btnReset'].forEach(id => $(id).disabled = false);
+  ['btnExport', 'btnCurves', 'btnApply', 'btnAdd', 'btnReset'].forEach(id => $(id).disabled = false);
   renderFiles(); renderPoints(); renderTab(); renderTraceSel(); draw();
 }
 

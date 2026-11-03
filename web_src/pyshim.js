@@ -44,8 +44,10 @@
       m = await call('upload', { cfg: opt.body.get('config'), files }, files.map(f => f.buf));
     } else if (url.startsWith('/api/analyse/')) m = await call('analyse', { cfg: opt.body });
     else if (url.startsWith('/api/export/')) m = await call('export', { cfg: opt.body });
+    else if (url.startsWith('/api/curves/')) m = await call('curves', { cfg: opt.body });
     else return new Response('{"error":"rota desconhecida"}', { status: 404 });
-    return m.bin ? new Response(new Blob([m.bin], { type: XLSX }), { status: m.status, headers: { 'Content-Type': XLSX } })
+    const type = url.startsWith('/api/curves/') ? 'application/zip' : XLSX;
+    return m.bin ? new Response(new Blob([m.bin], { type }), { status: m.status, headers: { 'Content-Type': type } })
                  : new Response(m.json, { status: m.status, headers: { 'Content-Type': 'application/json' } });
   };
 })();

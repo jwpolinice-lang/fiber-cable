@@ -41,6 +41,7 @@ onmessage = async e => {
       r = api.upload('/up', m.cfg);
     } else if (m.op === 'analyse') { say('A recalcular...'); r = api.reanalyse(m.cfg); }
     else if (m.op === 'export') { say('A gerar o Excel...'); r = api.export(m.cfg); }
+    else if (m.op === 'curves') { say('A gerar as curvas...'); r = api.curves(m.cfg); }
     const [status, body, name] = r.toJs();
     r.destroy();
     out = typeof body === 'string' || body == null ? { status, json: body ?? '{"error":"Volte a carregar os ficheiros."}' }
