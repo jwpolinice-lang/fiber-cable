@@ -155,14 +155,15 @@ def _virtual_loop(t, evs):
     return _virtual_event(t, evs, mid, 0.05 * (evs[-1].distance_m - evs[0].distance_m) + 20)
 
 
-def _virtual_event(t, evs, target, span):
+def _virtual_event(t, evs, target, span, peaks=True):
     """Conector que o OTDR não marcou perto de `target`: pico reflexivo mais próximo, perda calculada na curva.
+    Com peaks=False (fusão) não procura pico: o evento fica em `target`, não reflexivo.
     Acrescenta o evento a t.events e a evs e devolve o seu índice em evs."""
     from .sor import Event
     c = _curve(t)
     if not c:
         return None
-    peaks = [i * c.res for i in c.find_peaks(c.idx(target - span), c.idx(target + span))]
+    peaks = [i * c.res for i in c.find_peaks(c.idx(target - span), c.idx(target + span))] if peaks else []
     x = min(peaks, key=lambda p: abs(p - target)) if peaks else target
     lo = max([e.distance_m for e in evs if e.distance_m < x - 1], default=None)
     hi = min([e.distance_m for e in evs if e.distance_m > x + 1], default=None)
@@ -321,8 +322,10 @@ def build_segments(traces, mode='auto', pairs=None, launch_m=None):
     # bouclage, duas épissures simétricas não podem passar por uma bobine
     # tipo de bouclage escolhido pelo utilizador, com bobines de início e de fim parecidas: jarretière de
     # ~10 cm (A e B são um só evento, a meio da curva toda) ou bobine de 2 km entre A e B
-    forced = mode in ('loop_jar', 'loop_bob')
-    jar = mode == 'loop_jar'
+    # fusão de bouclage: como a jarretière (um só evento a meio), mas não reflete e muitas vezes não se vê
+    fusion = mode == 'loop_fus'
+    forced = mode in ('loop_jar', 'loop_bob', 'loop_fus')
+    jar = mode in ('loop_jar', 'loop_fus')
     gap = ((0.6 * launch_m, 1.6 * launch_m) if launch_m else (1000.0, 3500.0)) if mode == 'loop_bob' else None
 
     jar_centre = {}
@@ -381,7 +384,7 @@ def build_segments(traces, mode='auto', pairs=None, launch_m=None):
     n_bob = sum(1 for k in kinds if k and k[0] != k[1])
     loop_kind = 'bobine' if mode == 'loop_bob' or (n_bob > n_direct and not jar) else 'direct'
     geo = _bobine_geometry(traces, gap) if loop_kind == 'bobine' else {}
-    if mode in ('loop_jar', 'loop_bob'):
+    if mode in ('loop_jar', 'loop_bob', 'loop_fus'):
         mode = 'loop'
     if mode == 'auto':
         loops = [k is not None for k in kinds]
@@ -467,8 +470,8 @@ def build_segments(traces, mode='auto', pairs=None, launch_m=None):
                     o2_virtual = o2_pos
             if loop_idx is None:
                 end = t.events[-1].distance_m
-                li = (_virtual_event(t, evs, jar_centre[id(t)], 30) if id(t) in jar_centre else
-                      _virtual_event(t, evs, end / 2, 0.05 * end)) if jar else _virtual_loop(t, evs)
+                li = (_virtual_event(t, evs, jar_centre[id(t)], 30, peaks=not fusion) if id(t) in jar_centre else
+                      _virtual_event(t, evs, end / 2, 0.05 * end, peaks=not fusion)) if jar else _virtual_loop(t, evs)
                 loop_idx = None if li is None else (li, li)
                 if li is None:
                     warnings.append(f'{t.filename}: ponto de bouclage não encontrado, ficheiro ignorado.')
@@ -862,6 +865,7 @@ def analyse(traces, mode='auto', tol=20.0, thresholds=None, point_names=None, ex
     th = dict(DEFAULT_THRESHOLDS)
     if thresholds:
         th.update({k: v for k, v in thresholds.items() if v is not None})
+    fusion = mode == 'loop_fus'
     mode, segments, warnings = build_segments(traces, mode, launch_m=launch_m)
     if not segments:
         return {'error': 'Nenhuma medida utilizável.', 'warnings': warnings}
@@ -906,6 +910,11 @@ def analyse(traces, mode='auto', tol=20.0, thresholds=None, point_names=None, ex
         n = _near(point_names, centers[k], tol) if isinstance(point_names, dict) else None
         names.append(n or default_names[k])
     kinds = ['connector' if i in (0, npts - 1) else 'splice' for i in range(npts)]
+    if fusion and npts > 1:
+        # bouclage por fusão: o ponto E é uma épissure (limiar de épissure, sem réflectance esperada)
+        kinds[-1] = 'splice'
+        if not (_near(point_names, centers[-1], tol) if isinstance(point_names, dict) else None):
+            names[-1] = 'Epissure de bouclage'
 
     # perdas por ponto
     points = []
