@@ -1,5 +1,5 @@
 // Guarda a app no telemóvel para funcionar sem rede no terreno.
-const CACHE = 'fibercable-4e3b4f8b8d21';
+const CACHE = 'fibercable-97fd4f9fe683';
 const FILES = ["./", "icon-180.png", "icon-192.png", "icon-512.png", "index.html", "manifest.webmanifest", "py_files.json", "pyodide/pyodide-lock.json", "pyodide/pyodide.asm.js", "pyodide/pyodide.asm.wasm", "pyodide/pyodide.js", "pyodide/python_stdlib.zip", "pyshim.js", "wheels/et_xmlfile-2.0.0-py3-none-any.zip", "wheels/openpyxl-3.1.5-py2.py3-none-any.zip", "worker.js"];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
