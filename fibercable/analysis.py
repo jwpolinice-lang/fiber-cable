@@ -648,7 +648,9 @@ def confirm_points(segments, clusters, tol, max_pairs=64):
         median = vals[len(vals) // 2] if len(vals) % 2 else (vals[len(vals) // 2 - 1] + vals[len(vals) // 2]) / 2
         share = sum(v >= (0 if both else 0.005) for v in vals) / len(vals)
         clusters[k]['evidence'] = {'median': round(median, 4), 'share': round(share, 2), 'n': len(per)}
-        if median >= 0.01 and share >= 0.75:
+        # uma épissure muito boa (gainer de um lado, perda do outro) tem média quase nula: se o OTDR a marcou
+        # em metade das medidas ou mais, basta o degrau ter o mesmo sinal na grande maioria das fibras
+        if share >= 0.75 and (median >= 0.01 or otdr[k] >= 0.5 * n_seg):
             accepted.add(k)
         else:
             rejected.append(clusters[k])
@@ -851,7 +853,8 @@ def suggestions(segments, centers, tol, threshold):
 
 
 def analyse(traces, mode='auto', tol=20.0, thresholds=None, point_names=None, excluded=None, overrides=None,
-            manual_points=None, auto_fill=True, detect_threshold=0.05, hide_rare=True, launch_m=None):
+            manual_points=None, auto_fill=True, detect_threshold=0.05, hide_rare=True, launch_m=None,
+            keep_points=None):
     """Análise completa.
 
     point_names / overrides / excluded são indexados pela posição do ponto (m desde a origem), para
@@ -860,13 +863,17 @@ def analyse(traces, mode='auto', tol=20.0, thresholds=None, point_names=None, ex
       overrides: {'186|7|1310|OE': 0.05}   (None apaga o valor)
       excluded: [2300.5, ...]              (pontos fantasma a ignorar)
       manual_points: [2300.0, ...]          (pontos acrescentados à mão)
+      keep_points: [5119.5, ...]            (pontos ignorados automaticamente que o utilizador repôs)
     """
     overrides = overrides or {}
     th = dict(DEFAULT_THRESHOLDS)
     if thresholds:
         th.update({k: v for k, v in thresholds.items() if v is not None})
-    fusion = mode == 'loop_fus'
     mode, segments, warnings = build_segments(traces, mode, launch_m=launch_m)
+    # com impulsos largos o OTDR marca a mesma épissure com ±20-30 m de diferença entre medidas (500 ns
+    # = ~100 m de impulso na fibra): a tolerância de alinhamento cresce com o impulso
+    pulse = max((t.pulse_ns or 0) for t in traces) if traces else 0
+    tol = max(tol, 0.12 * pulse)
     if not segments:
         return {'error': 'Nenhuma medida utilizável.', 'warnings': warnings}
 
@@ -879,7 +886,10 @@ def analyse(traces, mode='auto', tol=20.0, thresholds=None, point_names=None, ex
     rare = []
     if hide_rare:
         kept = [c for c in clusters if c not in removed]
-        rare = confirm_points(segments, kept, tol)
+        keep = [float(x) for x in (keep_points or [])]
+        # "Repor" num ponto escondido automaticamente: fica, mesmo sem prova na curva
+        rare = [c for c in confirm_points(segments, kept, tol)
+                if not any(abs(c['center'] - x) <= 1.0 for x in keep)]
         removed += rare
     clusters = [c for c in clusters if c not in removed]
     centers = [c['center'] for c in clusters]
@@ -910,11 +920,6 @@ def analyse(traces, mode='auto', tol=20.0, thresholds=None, point_names=None, ex
         n = _near(point_names, centers[k], tol) if isinstance(point_names, dict) else None
         names.append(n or default_names[k])
     kinds = ['connector' if i in (0, npts - 1) else 'splice' for i in range(npts)]
-    if fusion and npts > 1:
-        # bouclage por fusão: o ponto E é uma épissure (limiar de épissure, sem réflectance esperada)
-        kinds[-1] = 'splice'
-        if not (_near(point_names, centers[-1], tol) if isinstance(point_names, dict) else None):
-            names[-1] = 'Epissure de bouclage'
 
     # perdas por ponto
     points = []

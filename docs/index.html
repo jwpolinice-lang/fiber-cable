@@ -207,7 +207,7 @@
 const $ = id => document.getElementById(id);
 let R = null, job = null, tab = 'splices', addMode = false;
 // nomes, correções e exclusões indexados pela posição do ponto (m desde a origem)
-const state = { names: {}, excluded: [], overrides: {}, fiber_numbers: {}, manual: [] };
+const state = { names: {}, excluded: [], overrides: {}, fiber_numbers: {}, manual: [], keep: [] };
 const COLORS = ['#1f77b4','#d62728','#2ca02c','#9467bd','#ff7f0e','#17becf','#8c564b','#e377c2'];
 const touch = matchMedia('(pointer: coarse)').matches;
 if (matchMedia('(max-width: 700px)').matches) document.querySelectorAll('details.fold').forEach(d => d.open = false);
@@ -257,7 +257,7 @@ const FR = {
   'Ficheiro': 'Fichier', 'Fibra': 'Fibre', '#': '#', 'Nome do ponto': 'Nom du point', 'Tipo': 'Type',
   'Dist. cum. (m)': 'Dist. cum. (m)', 'Troço (m)': 'Tronçon (m)', 'Marcado pelo OTDR': 'Marqué par l\'OTDR',
   'Calculado': 'Calculé', 'manual': 'manuel', 'Remover': 'Supprimer', 'Ignorar': 'Ignorer',
-  'Ignorar este ponto (evento fantasma)': 'Ignorer ce point (événement fantôme)', 'Repor todos': 'Tout rétablir',
+  'Ignorar este ponto (evento fantasma)': 'Ignorer ce point (événement fantôme)', 'Repor todos': 'Tout rétablir', 'Distância': 'Distance', 'Ignorado': 'Ignoré', 'automaticamente': 'automatiquement', 'por si': 'par vous', 'Voltar a mostrar': 'Rétablir',
   'Possíveis eventos não marcados por nenhuma medida': 'Événements possibles non marqués par aucune mesure',
   'Posição (m desde a origem)': 'Position (m depuis l\'origine)', 'Visto em': 'Vu dans', 'Adicionar': 'Ajouter',
   'Média ép.': 'Moy. ép.', 'Ponto': 'Point', 'Média (dB)': 'Moyenne (dB)', 'Média (dB/km)': 'Moyenne (dB/km)',
@@ -281,6 +281,7 @@ const FR_RE = [
   [/^(\d+) ficheiros \(mostrar e corrigir nº de fibra\)$/, '$1 fichiers (afficher et corriger le n° de fibre)'],
   [/^(\d+) ponto\(s\) ignorado\(s\)/, '$1 point(s) ignoré(s)'],
   [/\((\d+) automaticamente, porque a curva das outras fibras não mostra nada nesse sítio: /, '($1 automatiquement, car la courbe des autres fibres ne montre rien à cet endroit : '],
+  [/\((\d+) automaticamente, porque a curva das outras fibras não mostra nada nesse sítio\)/, '($1 automatiquement, car la courbe des autres fibres ne montre rien à cet endroit)'],
   [/^(\d+) traços \(escolher um na lista para ver os valores\)$/, '$1 traces (en choisir une dans la liste pour voir les valeurs)'],
   [/^(.*) \(fibra (\S+), (\d+) nm\)$/, '$1 (fibre $2, $3 nm)'],
   [/^Recalculado \(OTDR dava (.*) dB\)$/, 'Recalculé (l\'OTDR donnait $1 dB)'],
@@ -368,7 +369,7 @@ function config() {
     thresholds: { splice: $('th_splice').value, connector: $('th_connector').value, reflectance: $('th_refl').value,
                   diff_1550_1310: $('th_diff').value, slope: { 1310: $('th_s1310').value, 1550: $('th_s1550').value } },
     names: state.names, excluded: state.excluded, overrides: state.overrides, fiber_numbers: state.fiber_numbers,
-    manual: state.manual, show_rare: !!state.show_rare,
+    manual: state.manual, keep: state.keep, show_rare: !!state.show_rare,
     meta: { cable: $('m_cable').value, origin: $('m_origin').value, end: $('m_end').value, address: $('m_address').value,
             company: $('m_company').value, manager: $('m_manager').value, cable_type: $('m_cable_type').value,
             fiber_type: $('m_fiber_type').value, date: $('m_date').value }
@@ -378,7 +379,7 @@ function config() {
 async function upload(files) {
   const fd = new FormData();
   [...files].forEach(f => fd.append('files', f));
-  Object.assign(state, { names: {}, excluded: [], overrides: {}, fiber_numbers: {}, manual: [], show_rare: false });
+  Object.assign(state, { names: {}, excluded: [], overrides: {}, fiber_numbers: {}, manual: [], keep: [], show_rare: false });
   fd.append('config', JSON.stringify(config()));
   $('files').textContent = 'A processar...';
   let d;
@@ -415,7 +416,7 @@ $('btnReset').onclick = () => {
   if (!confirm(T('Limpar os ficheiros e os resultados e recomeçar?'))) return;
   R = null; job = null; view = null; geo = null; dragX = null; full = null; cursorX = null;
   if (addMode) $('btnAdd').onclick();
-  Object.assign(state, { names: {}, excluded: [], overrides: {}, fiber_numbers: {}, manual: [], show_rare: false });
+  Object.assign(state, { names: {}, excluded: [], overrides: {}, fiber_numbers: {}, manual: [], keep: [], show_rare: false });
   $('file').value = '';
   $('files').innerHTML = ''; $('points').textContent = 'Carregue os ficheiros .sor para começar.';
   ['sugg', 'warnings', 'tab', 'legend', 'saveBox', 'traceSel', 'ciCursor', 'ciView'].forEach(id => $(id).innerHTML = '');
@@ -490,20 +491,37 @@ function renderPoints() {
                        `<button class="sec small" data-x="${p.center}" title="Ignorar este ponto (evento fantasma)">Ignorar</button>`}</td></tr>`;
   });
   h += '</table>';
-  const nRare = R.removed_points.filter(p => p.rare).length;
-  if (R.removed_points.length) h += `<p class="muted">${R.removed_points.length} ponto(s) ignorado(s)` +
-    (nRare ? ` (${nRare} automaticamente, porque a curva das outras fibras não mostra nada nesse sítio: ` +
-      R.removed_points.filter(p => p.rare).slice(0, 12).map(p => fmt(p.center / 1000, 3) + ' km').join(', ') +
-      (nRare > 12 ? ', ...' : '') + ')' : '') +
-    `. <button class="sec small" id="restore">Repor todos</button></p>`;
+  // pontos ignorados: cada um pode voltar sozinho, sem repor os outros
+  const rm = R.removed_points;
+  if (rm.length) {
+    const nRare = rm.filter(p => p.rare).length;
+    h += `<details class="ign"${rm.length <= 12 ? ' open' : ''}><summary class="muted">${rm.length} ponto(s) ignorado(s)` +
+      (nRare ? ` (${nRare} automaticamente, porque a curva das outras fibras não mostra nada nesse sítio)` : '') +
+      ` <button class="sec small" id="restore">Repor todos</button></summary><table>` +
+      '<tr><th>Distância</th><th>Marcado pelo OTDR</th><th>Ignorado</th><th></th></tr>' +
+      rm.map(p => `<tr><td>${fmt(p.center / 1000, 3)} km</td><td>${p.hits}/${total}</td>
+        <td>${p.rare ? 'automaticamente' : 'por si'}</td>
+        <td><button class="sec small" data-back="${p.center}" data-rare="${p.rare ? 1 : 0}">Voltar a mostrar</button></td></tr>`).join('') +
+      '</table></details>';
+  }
   $('points').innerHTML = h;
   $('points').querySelectorAll('.pn').forEach(i => i.onchange = () => { state.names[i.dataset.k] = i.value; reanalyse(); });
-  $('points').querySelectorAll('[data-x]').forEach(b => b.onclick = () => { state.excluded.push(+b.dataset.x); reanalyse(); });
+  $('points').querySelectorAll('[data-x]').forEach(b => b.onclick = () => {
+    const c = +b.dataset.x;
+    state.keep = state.keep.filter(x => Math.abs(x - c) > 1); state.excluded.push(c); reanalyse();
+  });
+  $('points').querySelectorAll('[data-back]').forEach(b => b.onclick = e => {
+    e.preventDefault();
+    const c = +b.dataset.back;
+    if (b.dataset.rare === '1') state.keep.push(c);
+    else state.excluded = state.excluded.filter(x => Math.abs(x - c) > 1);
+    reanalyse();
+  });
   $('points').querySelectorAll('[data-rm]').forEach(b => b.onclick = () => {
     const c = +b.dataset.rm;
     state.manual = state.manual.filter(m => Math.abs(m - c) > (+R.tol || 20)); reanalyse();
   });
-  const rs = $('restore'); if (rs) rs.onclick = () => { state.excluded = []; state.show_rare = true; reanalyse(); };
+  const rs = $('restore'); if (rs) rs.onclick = e => { e.preventDefault(); state.excluded = []; state.keep = []; state.show_rare = true; reanalyse(); };
 
   const sg = R.suggestions || [];
   $('sugg').innerHTML = sg.length ? `<h3 style="font-size:13px;margin:12px 0 4px">Possíveis eventos não marcados por nenhuma medida</h3>
