@@ -126,8 +126,9 @@
       <summary><h2>Processamento</h2></summary>
       <div class="row2">
         <div><label>Modo de medida</label>
-          <select id="mode"><option value="auto">Automático</option><option value="loop_jar">Bouclage por jarretière (bobines 2 km início e fim)</option><option value="loop_bob">Bouclage por bobine 2 km (bobines 2 km início e fim)</option><option value="loop">Bouclage (tipo automático)</option><option value="direct">OE / EO separados</option></select></div>
+          <select id="mode"><option value="auto">Automático</option><option value="loop_jar">Bouclage por jarretière (bobines início e fim)</option><option value="loop_bob">Bouclage por bobine (bobines início, bouclage e fim)</option><option value="loop">Bouclage (tipo automático)</option><option value="direct">OE / EO separados</option></select></div>
         <div><label>Tolerância alinhamento (m)</label><input id="tol" type="number" value="20" step="1"></div>
+        <div><label>Bobine amorce</label><select id="launch"><option value="auto">Automático</option><option value="500">500 m</option><option value="1000">1 km</option><option value="2000">2 km</option></select></div>
       </div>
       <label class="chk" style="margin-top:10px"><input id="auto_fill" type="checkbox" checked> Calcular na curva os eventos que o OTDR não marcou</label>
       <label class="chk"><input id="detect" type="checkbox" checked> Procurar eventos que nenhuma medida marcou</label>
@@ -219,8 +220,9 @@ const FR = {
   'ou clicar para escolher': 'ou cliquer pour choisir', 'Tocar para escolher os ficheiros .sor': 'Toucher pour choisir les fichiers .sor',
   '(ou um .zip com eles)': '(ou un .zip qui les contient)',
   'Processamento': 'Traitement', 'Modo de medida': 'Mode de mesure', 'Automático': 'Automatique',
-  'Bouclage por jarretière (bobines 2 km início e fim)': 'Bouclage par jarretière (bobines 2 km amorce et fin)',
-  'Bouclage por bobine 2 km (bobines 2 km início e fim)': 'Bouclage par bobine 2 km (bobines 2 km amorce et fin)',
+  'Bouclage por jarretière (bobines início e fim)': 'Bouclage par jarretière (bobines amorce et fin)',
+  'Bouclage por bobine (bobines início, bouclage e fim)': 'Bouclage par bobine (bobines amorce, bouclage et fin)',
+  'Bobine amorce': 'Bobine amorce',
   'Bouclage (tipo automático)': 'Bouclage (type automatique)', 'OE / EO separados': 'OE / EO séparés',
   'Tolerância alinhamento (m)': 'Tolérance d\'alignement (m)',
   'Calcular na curva os eventos que o OTDR não marcou': 'Calculer sur la courbe les événements non marqués par l\'OTDR',
@@ -297,6 +299,7 @@ const FR_RE = [
   [/: o OTDR não marcou o bouclage, evento calculado na curva\.$/, ' : l\'OTDR n\'a pas marqué le bouclage, événement calculé sur la courbe.'],
   [/: fibra (\S+) sem parceira de bouclage, só o sentido OE é usado\.$/, ' : fibre $1 sans partenaire de bouclage, seul le sens OE est utilisé.'],
   [/: o OTDR não marcou o connecteur O', calculado na curva\.$/, ' : l\'OTDR n\'a pas marqué le connecteur O\', calculé sur la courbe.'],
+  [/: o OTDR não marcou o conector no fim da bobine amorce, calculado na curva\.$/, ' : l\'OTDR n\'a pas marqué le connecteur en fin de bobine amorce, calculé sur la courbe.'],
   [/: zip inválido$/, ' : zip invalide'], [/: o zip não tem ficheiros \.sor$/, ' : le zip ne contient pas de fichiers .sor'],
 ];
 let lang = 'pt';
@@ -358,7 +361,7 @@ $('file').onchange = e => upload(e.target.files);
 
 function config() {
   return {
-    mode: $('mode').value, tol: $('tol').value,
+    mode: $('mode').value, tol: $('tol').value, launch: $('launch').value,
     auto_fill: $('auto_fill').checked, detect: $('detect').checked, detect_threshold: $('detect_threshold').value,
     thresholds: { splice: $('th_splice').value, connector: $('th_connector').value, reflectance: $('th_refl').value,
                   diff_1550_1310: $('th_diff').value, slope: { 1310: $('th_s1310').value, 1550: $('th_s1550').value } },
@@ -420,7 +423,7 @@ $('btnReset').onclick = () => {
   window.scrollTo(0, 0);
 };
 $('btnApply').onclick = reanalyse;
-['mode', 'tol', 'auto_fill', 'detect', 'detect_threshold'].forEach(id => $(id).onchange = reanalyse);
+['mode', 'tol', 'launch', 'auto_fill', 'detect', 'detect_threshold'].forEach(id => $(id).onchange = reanalyse);
 
 async function download(route, name, shareLabel) {
   const r = await busy(() => fetch(route + job, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config()) }));

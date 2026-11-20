@@ -61,6 +61,7 @@ def run(traces, cfg, th):
                    overrides=cfg.get('overrides'), manual_points=cfg.get('manual'),
                    auto_fill=cfg.get('auto_fill', True),
                    hide_rare=not cfg.get('show_rare'),
+                   launch_m=float(cfg['launch']) if cfg.get('launch') not in (None, '', 'auto') else None,
                    detect_threshold=float(cfg.get('detect_threshold') or 0) if cfg.get('detect', True) else 0)
 
 

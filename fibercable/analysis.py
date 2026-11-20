@@ -288,11 +288,34 @@ def _mirror_score(traces, kinds):
     return scores[len(scores) // 2]
 
 
-def build_segments(traces, mode='auto', pairs=None):
+def _trim_launch(t, launch_m, warnings):
+    """Bobine amorce de comprimento conhecido: o connecteur O é o evento no fim dela (0 km depois da
+    bobine) e os eventos dentro da bobine saem. Sem evento lá, calcula-se o conector na curva."""
+    tol = max(30.0, 0.05 * launch_m)
+    evs = [e for e in t.events if not e.is_end]
+    near = [e for e in evs if abs(e.distance_m - launch_m) <= tol]
+    o = min(near, key=lambda e: abs(e.distance_m - launch_m)) if near else None
+    if o is None and t.events and t.events[-1].distance_m <= launch_m + tol:
+        return  # a medida acaba antes do fim da bobine: fica como está
+    cut = o.distance_m if o else launch_m
+    t.events = [e for e in t.events if e.is_end or e.distance_m >= cut - 1]
+    if o is None:
+        evs = [e for e in t.events if not e.is_end]
+        if _virtual_event(t, evs, launch_m, tol) is not None:
+            warnings.append(f'{t.filename}: o OTDR não marcou o conector no fim da bobine amorce, calculado na curva.')
+
+
+def build_segments(traces, mode='auto', pairs=None, launch_m=None):
     """Transforma os traços em segmentos por fibra/sentido."""
     warnings = []
     for t in traces:
+        # cada análise parte dos eventos do ficheiro (os calculados numa análise anterior não ficam)
+        if not hasattr(t, '_orig_events'):
+            t._orig_events = list(t.events)
+        t.events = list(t._orig_events)
         _ensure_events(t, warnings)
+        if launch_m:
+            _trim_launch(t, launch_m, warnings)
     fibers = sorted({t.fiber_number for t in traces if t.fiber_number is not None})
     # tipo de bouclage decidido pela maioria dos ficheiros: num ficheiro onde falta o evento de
     # bouclage, duas épissures simétricas não podem passar por uma bobine
@@ -300,7 +323,7 @@ def build_segments(traces, mode='auto', pairs=None):
     # ~10 cm (A e B são um só evento, a meio da curva toda) ou bobine de 2 km entre A e B
     forced = mode in ('loop_jar', 'loop_bob')
     jar = mode == 'loop_jar'
-    gap = (1000.0, 3500.0) if mode == 'loop_bob' else None
+    gap = ((0.6 * launch_m, 1.6 * launch_m) if launch_m else (1000.0, 3500.0)) if mode == 'loop_bob' else None
 
     jar_centre = {}
 
@@ -825,7 +848,7 @@ def suggestions(segments, centers, tol, threshold):
 
 
 def analyse(traces, mode='auto', tol=20.0, thresholds=None, point_names=None, excluded=None, overrides=None,
-            manual_points=None, auto_fill=True, detect_threshold=0.05, hide_rare=True):
+            manual_points=None, auto_fill=True, detect_threshold=0.05, hide_rare=True, launch_m=None):
     """Análise completa.
 
     point_names / overrides / excluded são indexados pela posição do ponto (m desde a origem), para
@@ -839,7 +862,7 @@ def analyse(traces, mode='auto', tol=20.0, thresholds=None, point_names=None, ex
     th = dict(DEFAULT_THRESHOLDS)
     if thresholds:
         th.update({k: v for k, v in thresholds.items() if v is not None})
-    mode, segments, warnings = build_segments(traces, mode)
+    mode, segments, warnings = build_segments(traces, mode, launch_m=launch_m)
     if not segments:
         return {'error': 'Nenhuma medida utilizável.', 'warnings': warnings}
 
