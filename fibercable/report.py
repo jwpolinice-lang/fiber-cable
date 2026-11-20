@@ -13,11 +13,13 @@ SUB_FILL = PatternFill('solid', fgColor='D9E2F3')
 OUT_FILL = PatternFill('solid', fgColor='FFC7CE')
 OUT_FONT = Font(bold=True, color='C00000', size=10)
 CENTER = Alignment(horizontal='center', vertical='center', wrap_text=True)
-NUM3 = '0.000'
 NUM2 = '0.00'
+NUM3 = NUM2  # o João quer no máximo 2 casas decimais no Excel (ex: 0,12)
 
 
 def _cell(ws, r, c, v=None, bold=False, fill=None, fmt=None, border=True, color=None, size=None, align=CENTER):
+    if fmt == NUM2 and isinstance(v, float):
+        v = round(v, 2)  # o valor guardado também fica com 2 casas, não só o que se vê
     cell = ws.cell(row=r, column=c, value=v)
     if bold or color or size:
         cell.font = Font(bold=bold, color=color, size=size or 10)
@@ -204,7 +206,7 @@ def build_workbook(res, meta):
                 _val(ws, r, c0 + block - 1, dv)
         for j, wl in enumerate(wls):
             s = res['summary'][f'{f}|{wl}']
-            _val(ws, r, cs + j, s['splice_mean'], fmt='0.0000')
+            _val(ws, r, cs + j, s['splice_mean'], fmt=NUM2)
             _val(ws, r, cs + len(wls) + j, s['splice_max'])
             _val(ws, r, cs + 2 * len(wls) + j, s['budget'])
         r += 1
@@ -214,7 +216,7 @@ def build_workbook(res, meta):
         for j, wl in enumerate(wls):
             vals = [p['data'][f'{f}|{wl}']['avg'] for f in fibers if p['data'][f'{f}|{wl}']['avg'] is not None]
             if vals:
-                _cell(ws, r, c0 + 3 * j + 2, sum(vals) / len(vals), fmt='0.0000', bold=True)
+                _cell(ws, r, c0 + 3 * j + 2, sum(vals) / len(vals), fmt=NUM2, bold=True)
     ws.column_dimensions['A'].width = 15
     for c in range(2, ncols + 1):
         ws.column_dimensions[get_column_letter(c)].width = 9
